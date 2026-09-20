@@ -1,0 +1,875 @@
+import React, { useState, useEffect, Suspense } from 'react';
+import { AuthProvider, useAuth } from '@/src/modules/auth/AuthContext';
+import { Header } from '@/src/components/layout/Header';
+import { BottomNav } from '@/src/components/layout/BottomNav';
+import { OfflineIndicator } from '@/src/components/layout/OfflineIndicator';
+import { ReloadPrompt } from '@/src/components/layout/ReloadPrompt';
+import { NotFoundView } from '@/src/components/layout/NotFoundView';
+import { DynamoCard } from '@/src/components/dynamos/DynamoCard';
+import { CreateDynamoModal } from '@/src/components/dynamos/CreateDynamoModal';
+import { ReplyModal } from '@/src/components/replies/ReplyModal';
+import { AuthModal } from '@/src/components/auth/AuthModal';
+import { NotificationsModal } from '@/src/components/notifications/NotificationsModal';
+import { GlobalBanner } from '@/src/components/common/GlobalBanner';
+import {
+  FeedSkeleton,
+  ProfileSkeleton,
+  DiscoverySkeleton,
+  SettingsSkeleton,
+  BestDynamosSkeleton,
+} from '@/src/components/layout/ViewSkeletons';
+import { DiscoverySection } from '@/src/modules/discovery/discoveryTypes';
+import { dynamosService } from '@/src/modules/dynamos/dynamosService';
+import { hashtagsService } from '@/src/modules/hashtags/hashtagsService';
+import { notificationsService } from '@/src/modules/notifications/notificationsService';
+import { repliesService } from '@/src/modules/replies/repliesService';
+import { Dynamo } from '@/src/modules/dynamos/dynamosTypes';
+import { Hashtag } from '@/src/modules/hashtags/hashtagsTypes';
+import { Notification } from '@/src/modules/notifications/notificationsTypes';
+import { economyService } from '@/src/modules/economy/economyService';
+import { FeedFilterType } from '@/src/modules/relationships/relationshipsTypes';
+import { Profile } from '@/src/modules/profiles/profilesTypes';
+import { PublicFooter } from '@/src/components/layout/PublicFooter';
+import { LegalDocsModal, LegalDocType } from '@/src/components/legal/LegalDocsModal';
+import { authService } from '@/src/modules/auth/authService';
+import { Zap, Plus, RefreshCw, Sparkles, AlertTriangle, CheckCircle2, Users, UserCheck, Flame, Shield, Trophy, Settings, ShieldAlert } from 'lucide-react';
+
+// Code-split heavy modules with React.lazy
+const ProfileView = React.lazy(() => import('@/src/components/profiles/ProfileView').then((m) => ({ default: m.ProfileView })));
+const LandingHero = React.lazy(() => import('@/src/components/landing/LandingHero').then((m) => ({ default: m.LandingHero })));
+const DiscoveryView = React.lazy(() => import('@/src/components/discovery/DiscoveryView').then((m) => ({ default: m.DiscoveryView })));
+const BestDynamosView = React.lazy(() => import('@/src/components/bestDynamos/BestDynamosView').then((m) => ({ default: m.BestDynamosView })));
+const AdminView = React.lazy(() => import('@/src/components/admin/AdminView').then((m) => ({ default: m.AdminView })));
+const SettingsView = React.lazy(() => import('@/src/components/settings/SettingsView').then((m) => ({ default: m.SettingsView })));
+const UserProfileModal = React.lazy(() => import('@/src/components/profiles/UserProfileModal').then((m) => ({ default: m.UserProfileModal })));
+const EconomyModal = React.lazy(() => import('@/src/components/economy/EconomyModal').then((m) => ({ default: m.EconomyModal })));
+const ReportModal = React.lazy(() => import('@/src/components/moderation/ReportModal').then((m) => ({ default: m.ReportModal })));
+
+const PAGE_SIZE = 20;
+
+function DynamoAppContent() {
+  const { user, profile, isRecoveryMode } = useAuth();
+
+  // Navigation & View State
+  const [currentTab, setCurrentTab] = useState<'feed' | 'discovery' | 'best-dynamos' | 'landing' | 'profile' | 'admin' | 'settings' | 'not-found'>('feed');
+  const [discoveryInitialSection, setDiscoveryInitialSection] = useState<DiscoverySection>('tendencias');
+  const [discoveryHashtag, setDiscoveryHashtag] = useState<string | null>(null);
+
+  // Sync /admin, /settings and 404 URL paths and hash
+  useEffect(() => {
+    const handleUrlChange = () => {
+      const path = window.location.pathname;
+      const hash = window.location.hash;
+      if (path === '/admin' || hash === '#/admin' || hash === '#admin') {
+        setCurrentTab('admin');
+      } else if (path === '/settings' || hash === '#/settings' || hash === '#settings') {
+        setCurrentTab('settings');
+      } else if (path === '/' || path === '') {
+        setCurrentTab((prev) => (prev === 'admin' || prev === 'settings' || prev === 'not-found' ? 'feed' : prev));
+      } else {
+        // Unknown path -> 404
+        setCurrentTab('not-found');
+      }
+    };
+
+    handleUrlChange();
+    window.addEventListener('popstate', handleUrlChange);
+    window.addEventListener('hashchange', handleUrlChange);
+    return () => {
+      window.removeEventListener('popstate', handleUrlChange);
+      window.removeEventListener('hashchange', handleUrlChange);
+    };
+  }, []);
+
+  const handleGoToAdmin = () => {
+    setCurrentTab('admin');
+    if (window.location.pathname !== '/admin') {
+      window.history.pushState(null, '', '/admin');
+    }
+  };
+
+  const handleGoToSettings = () => {
+    if (!user) {
+      setAuthModalMode('login');
+      setIsAuthModalOpen(true);
+      return;
+    }
+    setCurrentTab('settings');
+    if (window.location.pathname !== '/settings') {
+      window.history.pushState(null, '', '/settings');
+    }
+  };
+
+  const handleGoToHome = () => {
+    setSelectedTag(null);
+    setCurrentTab('feed');
+    if (window.location.pathname !== '/') {
+      window.history.pushState(null, '', '/');
+    }
+  };
+
+  // Modals
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [activeReplyDynamo, setActiveReplyDynamo] = useState<Dynamo | null>(null);
+  const [activeProfileModal, setActiveProfileModal] = useState<Profile | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<'login' | 'register' | 'forgot_password' | 'reset_password'>('login');
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [reportingTarget, setReportingTarget] = useState<{
+    dynamoId?: string;
+    replyId?: string;
+    authorId?: string;
+  } | null>(null);
+  const [isEconomyModalOpen, setIsEconomyModalOpen] = useState(false);
+  const [economyRefreshTrigger, setEconomyRefreshTrigger] = useState(0);
+
+  // Legal Modal
+  const [isLegalModalOpen, setIsLegalModalOpen] = useState(false);
+  const [activeLegalDoc, setActiveLegalDoc] = useState<LegalDocType>('about');
+
+  const handleOpenLegalDoc = (doc: LegalDocType) => {
+    setActiveLegalDoc(doc);
+    setIsLegalModalOpen(true);
+  };
+
+  // Trigger reset password modal automatically if recovery token was detected
+  useEffect(() => {
+    if (isRecoveryMode) {
+      setAuthModalMode('reset_password');
+      setIsAuthModalOpen(true);
+    }
+  }, [isRecoveryMode]);
+
+  // Data State
+  const [feedFilter, setFeedFilter] = useState<FeedFilterType>('todos');
+  const [dynamos, setDynamos] = useState<Dynamo[]>([]);
+  const [trendingTags, setTrendingTags] = useState<Hashtag[]>([]);
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [isLoadingFeed, setIsLoadingFeed] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMoreDynamos, setHasMoreDynamos] = useState(false);
+
+  const loadFeed = async (offset = 0, append = false, currentFilter: FeedFilterType = feedFilter) => {
+    if (offset === 0) setIsLoadingFeed(true);
+    else setIsLoadingMore(true);
+
+    try {
+      const data = await dynamosService.getActiveFeed(user?.id, PAGE_SIZE, offset, currentFilter);
+      if (append) {
+        setDynamos((prev) => [...prev, ...data]);
+      } else {
+        setDynamos(data);
+      }
+      setHasMoreDynamos(data.length === PAGE_SIZE);
+    } finally {
+      setIsLoadingFeed(false);
+      setIsLoadingMore(false);
+    }
+  };
+
+  const loadTags = async () => {
+    const tags = await hashtagsService.getTrendingHashtags();
+    setTrendingTags(tags);
+  };
+
+  const loadNotifications = async () => {
+    if (user?.id) {
+      const notifs = await notificationsService.getNotifications(user.id);
+      setNotifications(notifs);
+    }
+  };
+
+  useEffect(() => {
+    loadFeed(0, false, feedFilter);
+    loadTags();
+  }, [user?.id, feedFilter]);
+
+  useEffect(() => {
+    if (user?.id) {
+      loadNotifications();
+    }
+  }, [user]);
+
+  // Handle gifting energy without full page reload
+  const handleGiftEnergy = async (dynamoId: string) => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      throw new Error('Sin conexión. Inténtalo nuevamente cuando tengas internet.');
+    }
+
+    if (!user) {
+      setAuthModalMode('login');
+      setIsAuthModalOpen(true);
+      throw new Error('Inicia sesión para inyectar energía ⚡');
+    }
+
+    const result = await economyService.giveEnergyToDynamo(dynamoId, user.id);
+
+    // Refresh user balance indicator
+    setEconomyRefreshTrigger((prev) => prev + 1);
+
+    // Update state immediately
+    setDynamos((prev) =>
+      prev.map((d) =>
+        d.id === dynamoId
+          ? {
+              ...d,
+              expires_at: result.newExpiresAt,
+              energy_gifts_count: result.totalGifts,
+            }
+          : d
+      )
+    );
+
+    return result;
+  };
+
+  // Handle creating a new dynamo
+  const handleCreateDynamo = async (content: string, imageUrl?: string | null) => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      throw new Error('Sin conexión. Inténtalo nuevamente cuando tengas internet.');
+    }
+
+    if (!profile) {
+      setAuthModalMode('login');
+      setIsAuthModalOpen(true);
+      return;
+    }
+    const newDynamo = await dynamosService.createDynamo({ content, image_url: imageUrl }, profile);
+    setDynamos((prev) => [newDynamo, ...prev]);
+    await loadTags();
+    setCurrentTab('feed');
+  };
+
+  // Handle sending a reply
+  const handleSubmitReply = async (dynamoId: string, content: string) => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      throw new Error('Sin conexión. Inténtalo nuevamente cuando tengas internet.');
+    }
+
+    if (!profile) {
+      setAuthModalMode('login');
+      setIsAuthModalOpen(true);
+      throw new Error('Inicia sesión para responder');
+    }
+
+    await repliesService.createReply({ dynamoId, content }, profile);
+    setDynamos((prev) =>
+      prev.map((d) =>
+        d.id === dynamoId
+          ? { ...d, replies_count: (d.replies_count || 0) + 1 }
+          : d
+      )
+    );
+  };
+
+  // Handle deleting own dynamo
+  const handleDeleteDynamo = async (dynamoId: string) => {
+    if (!user?.id) return;
+    await dynamosService.deleteDynamo(dynamoId, user.id);
+    setDynamos((prev) => prev.filter((d) => d.id !== dynamoId));
+  };
+
+  // Handle when a dynamo expires in real-time (removes from feed)
+  const handleDynamoExpired = (dynamoId: string) => {
+    setDynamos((prev) => prev.filter((d) => d.id !== dynamoId));
+  };
+
+  const handleMarkAllNotificationsRead = async () => {
+    if (user?.id) {
+      await notificationsService.markAllAsRead(user.id);
+      loadNotifications();
+    }
+  };
+
+  const handleMarkNotificationRead = async (notificationId: string) => {
+    if (user?.id) {
+      await notificationsService.markAsRead(notificationId, user.id);
+      loadNotifications();
+    }
+  };
+
+  const handleNavigateNotificationContext = (notification: Notification) => {
+    setIsNotificationsOpen(false);
+    if (notification.reference_id) {
+      const targetDynamo = dynamos.find((d) => d.id === notification.reference_id);
+      if (targetDynamo) {
+        setActiveReplyDynamo(targetDynamo);
+      }
+    } else if (notification.sender) {
+      setActiveProfileModal(notification.sender);
+    }
+  };
+
+  // Filtered dynamos by selected hashtag
+  const displayedDynamos = selectedTag
+    ? dynamos.filter((d) => d.hashtags?.includes(selectedTag))
+    : dynamos;
+
+  const unreadCount = notifications.filter((n) => !n.read).length;
+
+  return (
+    <div className="min-h-screen bg-[#0B0E11] text-[#ECEFF1] flex flex-col font-sans selection:bg-amber-500 selection:text-black">
+      {/* Global System & Emergency Banner */}
+      <GlobalBanner />
+
+      {/* Global Header */}
+      <Header
+        onOpenAuth={() => {
+          setAuthModalMode('login');
+          setIsAuthModalOpen(true);
+        }}
+        onOpenNotifications={() => setIsNotificationsOpen(true)}
+        unreadCount={unreadCount}
+        onGoToProfile={() => setCurrentTab('profile')}
+        onGoToHome={handleGoToHome}
+        onGoToAdmin={handleGoToAdmin}
+        onGoToSettings={handleGoToSettings}
+        onOpenEconomy={() => setIsEconomyModalOpen(true)}
+        economyRefreshTrigger={economyRefreshTrigger}
+      />
+
+      {/* Account Suspension Banner */}
+      {user && profile?.status === 'suspended' && (
+        <div
+          id="banner-user-suspended"
+          className="w-full bg-red-950/90 border-b border-red-800/80 px-4 py-3 text-xs text-red-200 shadow-sm"
+        >
+          <div className="max-w-4xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="w-4 h-4 text-red-400 shrink-0" />
+              <span>
+                <strong>Cuenta Suspendida:</strong> Tu cuenta se encuentra suspendida por el equipo de moderación debido a infracciones de las Normas de la Comunidad. La creación de contenido y reacciones están deshabilitadas.
+              </span>
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => handleOpenLegalDoc('community')}
+                className="underline hover:text-white transition font-medium"
+              >
+                Ver Normas
+              </button>
+              <button
+                type="button"
+                onClick={() => authService.signOut()}
+                className="px-2.5 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 font-semibold transition"
+              >
+                Cerrar Sesión
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Main Container */}
+      <main className="flex-1 w-full max-w-4xl mx-auto px-4 sm:px-6 py-4 sm:py-6 pb-24 sm:pb-12">
+        {/* Navigation Tabs Header (Desktop / Tablet) */}
+        <div className="hidden sm:flex items-center justify-between mb-6 pb-3 border-b border-[#1F262E]">
+          <div className="flex items-center gap-1 bg-[#13181E] p-1 rounded-xl border border-[#21272E]">
+            <button
+              id="desktop-tab-feed"
+              onClick={() => {
+                setSelectedTag(null);
+                setDiscoveryHashtag(null);
+                setCurrentTab('feed');
+              }}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition ${
+                currentTab === 'feed'
+                  ? 'bg-amber-500 text-black shadow-sm'
+                  : 'text-stone-400 hover:text-white'
+              }`}
+            >
+              Feed Principal
+            </button>
+            <button
+              id="desktop-tab-discovery"
+              onClick={() => {
+                setDiscoveryHashtag(null);
+                setDiscoveryInitialSection('tendencias');
+                setCurrentTab('discovery');
+              }}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition flex items-center gap-1.5 ${
+                currentTab === 'discovery'
+                  ? 'bg-amber-500 text-black shadow-sm'
+                  : 'text-stone-400 hover:text-white'
+              }`}
+            >
+              <Flame className="w-3.5 h-3.5" />
+              <span>Descubrimiento</span>
+            </button>
+            <button
+              id="desktop-tab-best-dynamos"
+              onClick={() => setCurrentTab('best-dynamos')}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition flex items-center gap-1.5 ${
+                currentTab === 'best-dynamos'
+                  ? 'bg-amber-500 text-black shadow-sm'
+                  : 'text-stone-400 hover:text-white'
+              }`}
+            >
+              <Trophy className="w-3.5 h-3.5" />
+              <span>Best Dynamos</span>
+            </button>
+            <button
+              id="desktop-tab-manifesto"
+              onClick={() => setCurrentTab('landing')}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition ${
+                currentTab === 'landing'
+                  ? 'bg-amber-500 text-black shadow-sm'
+                  : 'text-stone-400 hover:text-white'
+              }`}
+            >
+              Manifiesto
+            </button>
+            {user && (
+              <button
+                id="desktop-tab-profile"
+                onClick={() => setCurrentTab('profile')}
+                className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition ${
+                  currentTab === 'profile'
+                    ? 'bg-amber-500 text-black shadow-sm'
+                    : 'text-stone-400 hover:text-white'
+                }`}
+              >
+                Mi Perfil
+              </button>
+            )}
+            {user && (
+              <button
+                id="desktop-tab-settings"
+                onClick={handleGoToSettings}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition flex items-center gap-1.5 ${
+                  currentTab === 'settings'
+                    ? 'bg-amber-500 text-black shadow-sm font-bold'
+                    : 'text-stone-400 hover:text-white'
+                }`}
+                title="Configuración y Privacidad (/settings)"
+              >
+                <Settings className="w-3.5 h-3.5" />
+                <span>Ajustes</span>
+              </button>
+            )}
+            {profile && (profile.role === 'admin' || profile.role === 'moderator') && (
+              <button
+                id="desktop-tab-admin"
+                onClick={handleGoToAdmin}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition flex items-center gap-1.5 ${
+                  currentTab === 'admin'
+                    ? 'bg-amber-500 text-black shadow-sm font-bold'
+                    : 'text-amber-400 hover:text-white'
+                }`}
+                title="Panel de Administración"
+              >
+                <Shield className="w-3.5 h-3.5" />
+                <span>Admin</span>
+              </button>
+            )}
+          </div>
+
+          <button
+            id="desktop-btn-create"
+            onClick={() => {
+              if (!user) {
+                setAuthModalMode('login');
+                setIsAuthModalOpen(true);
+              } else {
+                setIsCreateModalOpen(true);
+              }
+            }}
+            className="flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2 text-xs font-bold text-black hover:bg-amber-400 active:scale-95 transition shadow-sm"
+          >
+            <Plus className="w-4 h-4 stroke-[2.5]" />
+            <span>Crear Dynamo</span>
+          </button>
+        </div>
+
+        {/* Tab: 404 Not Found View */}
+        {currentTab === 'not-found' && (
+          <Suspense fallback={<FeedSkeleton />}>
+            <NotFoundView onGoHome={handleGoToHome} />
+          </Suspense>
+        )}
+
+        {/* Tab: Admin Panel (/admin) */}
+        {currentTab === 'admin' && (
+          <Suspense fallback={<SettingsSkeleton />}>
+            <AdminView onGoToHome={handleGoToHome} />
+          </Suspense>
+        )}
+
+        {/* Tab 1: Manifesto / Landing */}
+        {currentTab === 'landing' && (
+          <Suspense fallback={<FeedSkeleton />}>
+            <LandingHero
+              onStartExploring={() => setCurrentTab('feed')}
+              onOpenAuth={() => {
+                setAuthModalMode('login');
+                setIsAuthModalOpen(true);
+              }}
+              onOpenRegister={() => {
+                setAuthModalMode('register');
+                setIsAuthModalOpen(true);
+              }}
+              onOpenLogin={() => {
+                setAuthModalMode('login');
+                setIsAuthModalOpen(true);
+              }}
+            />
+          </Suspense>
+        )}
+
+        {/* Tab 2: Profile */}
+        {currentTab === 'profile' && (
+          <Suspense fallback={<ProfileSkeleton />}>
+            <ProfileView onGoToSettings={handleGoToSettings} />
+          </Suspense>
+        )}
+
+        {/* Tab: Settings & Privacy (/settings) */}
+        {currentTab === 'settings' && (
+          <Suspense fallback={<SettingsSkeleton />}>
+            <SettingsView
+              onGoToHome={handleGoToHome}
+              onGoToProfile={() => setCurrentTab('profile')}
+            />
+          </Suspense>
+        )}
+
+        {/* Tab: Best Dynamos (Salón Histórico) */}
+        {currentTab === 'best-dynamos' && (
+          <Suspense fallback={<BestDynamosSkeleton />}>
+            <BestDynamosView
+              currentUserId={user?.id}
+              onAuthorClick={(author) => setActiveProfileModal(author)}
+              onRequireAuth={() => {
+                setAuthModalMode('login');
+                setIsAuthModalOpen(true);
+              }}
+            />
+          </Suspense>
+        )}
+
+        {/* Tab 3: Discovery Module (Tendencias, Casi desaparecen, Reviviendo) */}
+        {currentTab === 'discovery' && (
+          <Suspense fallback={<DiscoverySkeleton />}>
+            <DiscoveryView
+              currentUserId={user?.id}
+              onGiftEnergy={handleGiftEnergy}
+              onOpenReply={(d) => setActiveReplyDynamo(d)}
+              onReport={(id, authorId) => setReportingTarget({ dynamoId: id, authorId })}
+              onDelete={handleDeleteDynamo}
+              onAuthorClick={(author) => setActiveProfileModal(author)}
+              onRequireAuth={() => {
+                setAuthModalMode('login');
+                setIsAuthModalOpen(true);
+              }}
+              initialSection={discoveryInitialSection}
+              initialHashtag={discoveryHashtag}
+            />
+          </Suspense>
+        )}
+
+        {/* Tab 4: Feed */}
+        {currentTab === 'feed' && (
+          <div className="space-y-4 sm:space-y-5">
+            {/* Feed Filter Bar: Todos | Siguiendo | Amigos */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-[#1C2229]">
+              <div className="flex items-center gap-1.5 p-1 bg-[#12161A] rounded-xl border border-[#21272E] w-fit">
+                <button
+                  id="tab-feed-todos"
+                  onClick={() => setFeedFilter('todos')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                    feedFilter === 'todos'
+                      ? 'bg-amber-500 text-black shadow-sm'
+                      : 'text-stone-400 hover:text-white'
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Todos</span>
+                </button>
+
+                <button
+                  id="tab-feed-siguiendo"
+                  onClick={() => {
+                    if (!user) {
+                      setAuthModalMode('login');
+                      setIsAuthModalOpen(true);
+                      return;
+                    }
+                    setFeedFilter('siguiendo');
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                    feedFilter === 'siguiendo'
+                      ? 'bg-amber-500 text-black shadow-sm'
+                      : 'text-stone-400 hover:text-white'
+                  }`}
+                >
+                  <UserCheck className="w-3.5 h-3.5" />
+                  <span>Siguiendo</span>
+                </button>
+
+                <button
+                  id="tab-feed-amigos"
+                  onClick={() => {
+                    if (!user) {
+                      setAuthModalMode('login');
+                      setIsAuthModalOpen(true);
+                      return;
+                    }
+                    setFeedFilter('amigos');
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                    feedFilter === 'amigos'
+                      ? 'bg-emerald-500 text-black shadow-sm font-extrabold'
+                      : 'text-stone-400 hover:text-white'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Amigos</span>
+                </button>
+              </div>
+
+              {/* Hashtag Filters & Refresh */}
+              <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-0.5">
+                {selectedTag && (
+                  <button
+                    onClick={() => setSelectedTag(null)}
+                    className="px-2.5 py-1 rounded-full bg-amber-500 text-black font-bold text-[11px] shrink-0 flex items-center gap-1"
+                  >
+                    <span>#{selectedTag}</span>
+                    <span>✕</span>
+                  </button>
+                )}
+
+                {trendingTags.slice(0, 3).map((tag) => (
+                  <button
+                    key={tag.id}
+                    onClick={() => setSelectedTag(selectedTag === tag.name ? null : tag.name)}
+                    className={`px-2.5 py-1 rounded-full border text-[11px] font-mono shrink-0 transition ${
+                      selectedTag === tag.name
+                        ? 'bg-amber-500 text-black border-amber-500 font-semibold'
+                        : 'bg-[#141A20] text-stone-300 border-[#222932] hover:border-stone-700'
+                    }`}
+                  >
+                    #{tag.name}
+                  </button>
+                ))}
+
+                <button
+                  id="btn-feed-go-discovery"
+                  onClick={() => {
+                    setDiscoveryHashtag(null);
+                    setDiscoveryInitialSection('tendencias');
+                    setCurrentTab('discovery');
+                  }}
+                  className="px-2.5 py-1 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-400 text-[11px] font-semibold shrink-0 hover:bg-amber-500/20 transition flex items-center gap-1"
+                  title="Explorar tendencias y descubrimiento"
+                >
+                  <Flame className="w-3 h-3" />
+                  <span>Descubrir</span>
+                </button>
+
+                <button
+                  id="btn-refresh-feed"
+                  onClick={() => loadFeed(0, false, feedFilter)}
+                  className="p-1.5 rounded-lg text-stone-400 hover:text-white shrink-0 hover:bg-[#151D25] transition ml-auto sm:ml-0"
+                  title="Actualizar publicaciones"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingFeed ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
+            </div>
+
+            {/* Dynamos Feed Stream with Skeleton Loader */}
+            {isLoadingFeed ? (
+              <FeedSkeleton />
+            ) : displayedDynamos.length === 0 ? (
+              <div className="rounded-2xl border border-[#21272E] bg-[#12161A] p-8 sm:p-12 text-center text-stone-400 space-y-3">
+                <Sparkles className="w-8 h-8 mx-auto text-amber-400/50" />
+                <p className="text-stone-200 font-semibold text-sm sm:text-base">⚡ Estás al día.</p>
+                <p className="text-xs text-stone-400 max-w-sm mx-auto">
+                  No hay publicaciones vivas en este momento con este filtro. Sé el primero en iniciar un pulso.
+                </p>
+                <button
+                  onClick={() => {
+                    if (!user) {
+                      setAuthModalMode('login');
+                      setIsAuthModalOpen(true);
+                    } else {
+                      setIsCreateModalOpen(true);
+                    }
+                  }}
+                  className="rounded-xl bg-amber-500 px-4 py-2 text-xs font-bold text-black hover:bg-amber-400 transition shadow-md shadow-amber-500/20"
+                >
+                  Publicar Dynamo
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {displayedDynamos.map((dynamo) => (
+                  <DynamoCard
+                    key={dynamo.id}
+                    dynamo={dynamo}
+                    onGiftEnergy={handleGiftEnergy}
+                    onOpenReply={(d) => setActiveReplyDynamo(d)}
+                    onReport={(id, authorId) => setReportingTarget({ dynamoId: id, authorId })}
+                    onDelete={handleDeleteDynamo}
+                    onSelectHashtag={(tag) => {
+                      setDiscoveryHashtag(tag);
+                      setDiscoveryInitialSection('tendencias');
+                      setCurrentTab('discovery');
+                    }}
+                    onExpired={handleDynamoExpired}
+                    onAuthorClick={(author) => setActiveProfileModal(author)}
+                  />
+                ))}
+
+                {/* Pagination / End of feed indicator (NO infinite scroll) */}
+                {hasMoreDynamos ? (
+                  <div className="pt-2 text-center">
+                    <button
+                      onClick={() => loadFeed(dynamos.length, true)}
+                      disabled={isLoadingMore}
+                      className="px-5 py-2.5 rounded-xl border border-stone-800 bg-[#12161A] text-xs font-medium text-stone-300 hover:text-white hover:border-stone-700 transition disabled:opacity-50"
+                    >
+                      {isLoadingMore ? 'Cargando anteriores...' : 'Cargar publicaciones anteriores'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="py-6 text-center text-stone-400 flex flex-col items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-stone-300">
+                      <CheckCircle2 className="w-4 h-4 text-amber-400" />
+                      <span>⚡ Estás al día.</span>
+                    </div>
+                    <p className="text-[11px] text-stone-400">
+                      Has visto todas las publicaciones activas. Las no energizadas se desvanecieron.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Public Footer */}
+        <PublicFooter onOpenLegalDoc={handleOpenLegalDoc} />
+      </main>
+
+      {/* Offline Banner Indicator & PWA Update Notification */}
+      <OfflineIndicator />
+      <ReloadPrompt />
+
+      {/* Bottom Nav for Mobile */}
+      <BottomNav
+        currentTab={currentTab === 'admin' ? 'feed' : currentTab}
+        onSelectTab={(tab) => {
+          setSelectedTag(null);
+          if (tab === 'discovery') {
+            setDiscoveryHashtag(null);
+            setDiscoveryInitialSection('tendencias');
+          }
+          if (tab === 'settings') {
+            handleGoToSettings();
+            return;
+          }
+          if (window.location.pathname === '/admin' || window.location.pathname === '/settings') {
+            window.history.pushState(null, '', '/');
+          }
+          setCurrentTab(tab);
+        }}
+        onOpenCreateModal={() => {
+          if (!user) {
+            setAuthModalMode('login');
+            setIsAuthModalOpen(true);
+          } else {
+            setIsCreateModalOpen(true);
+          }
+        }}
+      />
+
+      {/* Modals */}
+      <CreateDynamoModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        onSubmit={handleCreateDynamo}
+      />
+
+      <ReplyModal
+        isOpen={Boolean(activeReplyDynamo)}
+        dynamo={activeReplyDynamo}
+        onClose={() => setActiveReplyDynamo(null)}
+        onSubmitReply={handleSubmitReply}
+        onReportReply={(replyId, authorId) => {
+          setReportingTarget({ replyId, authorId });
+        }}
+      />
+
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        initialMode={authModalMode}
+      />
+
+      <NotificationsModal
+        isOpen={isNotificationsOpen}
+        onClose={() => setIsNotificationsOpen(false)}
+        notifications={notifications}
+        onMarkAllRead={handleMarkAllNotificationsRead}
+        onMarkAsRead={handleMarkNotificationRead}
+        onNavigateContext={handleNavigateNotificationContext}
+      />
+
+      <Suspense fallback={null}>
+        {reportingTarget && (
+          <ReportModal
+            isOpen={Boolean(reportingTarget)}
+            dynamoId={reportingTarget?.dynamoId}
+            replyId={reportingTarget?.replyId}
+            targetAuthorId={reportingTarget?.authorId}
+            onClose={() => setReportingTarget(null)}
+          />
+        )}
+      </Suspense>
+
+      <Suspense fallback={null}>
+        {activeProfileModal && (
+          <UserProfileModal
+            isOpen={Boolean(activeProfileModal)}
+            targetProfile={activeProfileModal}
+            onClose={() => setActiveProfileModal(null)}
+            onRelationshipChanged={() => loadFeed(0, false, feedFilter)}
+            onOpenAuth={() => {
+              setAuthModalMode('login');
+              setIsAuthModalOpen(true);
+            }}
+          />
+        )}
+      </Suspense>
+
+      <Suspense fallback={null}>
+        {isEconomyModalOpen && (
+          <EconomyModal
+            isOpen={isEconomyModalOpen}
+            onClose={() => setIsEconomyModalOpen(false)}
+            userId={user?.id}
+          />
+        )}
+      </Suspense>
+
+      {/* Global Configurable Legal Documents Modal */}
+      <LegalDocsModal
+        isOpen={isLegalModalOpen}
+        onClose={() => setIsLegalModalOpen(false)}
+        initialDoc={activeLegalDoc}
+      />
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <DynamoAppContent />
+    </AuthProvider>
+  );
+}
