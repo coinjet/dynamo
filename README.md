@@ -88,7 +88,3 @@ La aplicación está preconfigurada en `vercel.json` como una Single Page Applic
 3. Comando de build: `npm run build`
 4. Directorio de salida: `dist`
 5. Haz clic en **Deploy**.
-
-- 20260919000001_dynamo_multimedia_storage.sql
-
-- 20260919000002_prelaunch_security_hardening.sql

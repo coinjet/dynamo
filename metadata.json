@@ -1,0 +1,6 @@
+{
+  "name": "Dynamo",
+  "description": "Red social de microcontenido efímero impulsada por energía ⚡. Publicaciones vivas de 24 horas que perduran según el pulso de la comunidad.",
+  "requestFramePermissions": ["notifications"],
+  "majorCapabilities": []
+}
