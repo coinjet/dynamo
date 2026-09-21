@@ -174,7 +174,7 @@ export const EconomyModal: React.FC<EconomyModalProps> = ({
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
                     <Gift className="w-3.5 h-3.5" />
-                    Dynamos Gratuitos (Cuota Diaria)
+                    Dynamos Gratuitos (Ventana Móvil 24h)
                   </span>
                   <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
                     {status?.free_available ?? 0} / {status?.free_limit ?? 10} disponibles
@@ -191,10 +191,16 @@ export const EconomyModal: React.FC<EconomyModalProps> = ({
                   />
                 </div>
 
+                <div className="flex items-center justify-between text-[11px] font-mono text-stone-400 pt-1">
+                  <div className="flex items-center gap-1.5 text-amber-400/90">
+                    <Clock className="w-3.5 h-3.5 shrink-0" />
+                    <span>Ventana móvil de 24 horas</span>
+                  </div>
+                  <span>{status?.free_used_today ?? 0} usados en las últimas 24h</span>
+                </div>
+
                 <p className="text-[11px] text-stone-400 leading-relaxed">
-                  Recibes una cuota de <strong>10 Dynamos gratuitos</strong> por cada ventana móvil
-                  de 24 horas. Cada regalo inyecta 1 ⚡ y extiende +6 horas la vida de una
-                  publicación (hasta un máximo de 168 horas).
+                  Dispones de una cuota de <strong>10 Dynamos gratuitos</strong> en una ventana móvil continua de 24 horas. Cada regalo inyecta 1 ⚡ y extiende +6 horas la vida de una publicación (hasta un máximo de 168 horas). Cada ⚡ gratuito utilizado se regenera automáticamente 24 horas después de haberlo enviado.
                 </p>
 
                 <div className="text-[10px] text-stone-500 bg-[#0E1216] p-2 rounded-lg border border-stone-800">
@@ -216,7 +222,7 @@ export const EconomyModal: React.FC<EconomyModalProps> = ({
 
                 <p className="text-[11px] text-stone-400 leading-relaxed">
                   Saldo adquirido permanente. Se consume automáticamente únicamente cuando agotas tu
-                  cuota gratuita diaria de 10 Dynamos.
+                  cuota gratuita de 10 Dynamos en tu ventana móvil de 24 horas.
                 </p>
 
                 {/* Future monetization placeholder without real gateway */}

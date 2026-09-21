@@ -17,6 +17,7 @@ interface AuthContextType {
   profile: UserProfile | null;
   isLoading: boolean;
   isRecoveryMode: boolean;
+  isEmailConfirmed: boolean;
   clearRecoveryMode: () => void;
   signIn: (params: SignInParams) => Promise<void>;
   signUp: (params: SignUpParams) => Promise<void>;
@@ -25,6 +26,8 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   updateProfileState: (fields: Partial<UserProfile>) => void;
   refreshProfile: () => Promise<void>;
+  resendConfirmationEmail: () => Promise<void>;
+  checkEmailConfirmation: () => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -61,11 +64,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setIsRecoveryMode(true);
         }
 
-        if (event === 'SIGNED_IN' && currentSession) {
+        if ((event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED') && currentSession) {
           const profile = await profilesService.getProfile(currentSession.user.id);
           if (profile && isMounted) {
+            const email_confirmed_at =
+              currentSession.user.email_confirmed_at || (currentSession.user as any).confirmed_at || null;
             setSession({
-              user: { id: currentSession.user.id, email: currentSession.user.email },
+              user: {
+                id: currentSession.user.id,
+                email: currentSession.user.email,
+                email_confirmed_at,
+              },
               profile,
             });
           }
@@ -151,6 +160,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const isEmailConfirmed = Boolean(
+    !session?.user ||
+    !isSupabaseConfigured ||
+    session.user.email_confirmed_at
+  );
+
+  const resendConfirmationEmail = async () => {
+    if (!session?.user?.email) {
+      throw new Error('No hay una dirección de correo asociada a la sesión.');
+    }
+    await authService.resendConfirmationEmail(session.user.email);
+  };
+
+  const checkEmailConfirmation = async (): Promise<boolean> => {
+    const result = await authService.checkEmailConfirmation();
+    if (result.isConfirmed && session?.user) {
+      const updated: AuthSession = {
+        ...session,
+        user: {
+          ...session.user,
+          email_confirmed_at: result.email_confirmed_at,
+        },
+      };
+      setSession(updated);
+      return true;
+    }
+    return false;
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -159,6 +197,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         profile: session ? session.profile : null,
         isLoading,
         isRecoveryMode,
+        isEmailConfirmed,
         clearRecoveryMode: () => setIsRecoveryMode(false),
         signIn,
         signUp,
@@ -167,6 +206,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         signOut,
         updateProfileState,
         refreshProfile,
+        resendConfirmationEmail,
+        checkEmailConfirmation,
       }}
     >
       {children}

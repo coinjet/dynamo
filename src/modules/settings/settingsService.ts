@@ -38,7 +38,7 @@ export const settingsService = {
           .from('user_settings')
           .select('*')
           .eq('user_id', userId)
-          .single();
+          .maybeSingle();
 
         if (!error && data) {
           return {
@@ -67,7 +67,7 @@ export const settingsService = {
           .from('user_settings')
           .insert(initial)
           .select('*')
-          .single();
+          .maybeSingle();
 
         if (!insertError && inserted) {
           return inserted as UserSettings;
@@ -112,10 +112,10 @@ export const settingsService = {
           updated_at: new Date().toISOString(),
         })
         .select('*')
-        .single();
+        .maybeSingle();
 
-      if (error) {
-        throw new Error(`Error al guardar configuración: ${error.message}`);
+      if (error || !data) {
+        throw new Error(error ? `Error al guardar configuración: ${error.message}` : 'Error al guardar configuración.');
       }
       return data as UserSettings;
     }

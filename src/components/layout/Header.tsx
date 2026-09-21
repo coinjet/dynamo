@@ -27,7 +27,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenEconomy,
   economyRefreshTrigger = 0,
 }) => {
-  const { session, profile } = useAuth();
+  const { session, profile, isEmailConfirmed, signOut } = useAuth();
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-[#21272E] bg-[#0E1216]/90 backdrop-blur-md">
@@ -56,8 +56,17 @@ export const Header: React.FC<HeaderProps> = ({
           <PWAInstallButton />
 
           {session ? (
-            <>
-              {profile && (profile.role === 'admin' || profile.role === 'moderator') && onGoToAdmin && (
+            !isEmailConfirmed ? (
+              <button
+                id="btn-header-signout-unconfirmed"
+                onClick={signOut}
+                className="text-xs px-3 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 font-medium transition cursor-pointer"
+              >
+                Cerrar sesión
+              </button>
+            ) : (
+              <>
+                {profile && (profile.role === 'admin' || profile.role === 'moderator') && onGoToAdmin && (
                 <button
                   id="btn-header-admin"
                   onClick={onGoToAdmin}
@@ -123,6 +132,7 @@ export const Header: React.FC<HeaderProps> = ({
                 )}
               </button>
             </>
+            )
           ) : (
             <button
               id="btn-open-login"

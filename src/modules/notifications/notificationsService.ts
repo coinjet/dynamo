@@ -357,4 +357,41 @@ export const notificationsService = {
       return 0;
     }
   },
+
+  /**
+   * Subscribes to real-time notification events for the given user.
+   * Calls onUpdate callback whenever a new notification is inserted, updated, or deleted.
+   * Returns an unsubscribe cleanup function.
+   */
+  subscribeToUserNotifications(userId: string, onUpdate: () => void): () => void {
+    if (!userId || !isSupabaseConfigured) {
+      return () => {};
+    }
+
+    try {
+      const channelName = `realtime-notifs-${userId}`;
+      const channel = supabase
+        .channel(channelName)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'notifications',
+            filter: `user_id=eq.${userId}`,
+          },
+          () => {
+            onUpdate();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    } catch (err) {
+      console.warn('Error subscribing to realtime notifications:', err);
+      return () => {};
+    }
+  },
 };

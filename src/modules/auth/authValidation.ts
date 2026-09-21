@@ -38,7 +38,7 @@ export const AUTH_LIMITS = {
   USERNAME_MIN_LENGTH: 3,
   USERNAME_MAX_LENGTH: 20,
   PASSWORD_MIN_LENGTH: 8,
-  BIO_MAX_LENGTH: 140,
+  BIO_MAX_LENGTH: 350,
 };
 
 export interface ValidationResult {
@@ -139,7 +139,7 @@ export function validatePassword(password: string): ValidationResult {
 
 /**
  * Sanitizes and validates bio according to Privacy & Security specifications:
- * - Max 140 characters
+ * - Max 350 characters
  * - Strips dangerous HTML / scripts
  * - Forbids phone numbers, WhatsApp links, personal emails, physical addresses
  */

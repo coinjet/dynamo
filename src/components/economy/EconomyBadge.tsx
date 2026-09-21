@@ -37,10 +37,15 @@ export const EconomyBadge: React.FC<EconomyBadgeProps> = ({
       id="btn-header-economy-badge"
       onClick={onClick}
       className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 text-xs font-mono font-bold transition group cursor-pointer"
-      title={`Saldo ⚡ disponible: ${status?.free_available ?? 10} gratis · ${status?.purchased_balance ?? 0} adquiridos`}
+      title={`Energía disponible: ${status?.free_available ?? 10}/${status?.free_limit ?? 10} gratuita en ventana móvil de 24h${
+        status?.purchased_balance ? ` (+${status.purchased_balance} adquiridos)` : ''
+      }`}
     >
       <Zap className="w-3.5 h-3.5 fill-amber-400 group-hover:scale-110 transition-transform" />
-      <span>{status ? status.total_available : 10}</span>
+      <span>{status ? `${status.free_available}/${status.free_limit}` : '10/10'}</span>
+      {Boolean(status?.purchased_balance) && (
+        <span className="text-[10px] text-amber-300/80 font-normal">+{status!.purchased_balance}</span>
+      )}
     </button>
   );
 };

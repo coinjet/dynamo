@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, MessageSquare, Send, AlertTriangle, Flag, Shield, Loader2 } from 'lucide-react';
+import { X, MessageSquare, Send, AlertTriangle, Flag, Shield, Loader2, Info } from 'lucide-react';
 import { Dynamo } from '@/src/modules/dynamos/dynamosTypes';
 import { Reply } from '@/src/modules/replies/repliesTypes';
 import { getDynamoTimeStatus } from '@/src/modules/dynamos/dynamoRules';
@@ -45,6 +45,7 @@ export const ReplyModal: React.FC<ReplyModalProps> = ({
   if (!isOpen || !dynamo) return null;
 
   const isHiddenByModeration = dynamo.status === 'hidden';
+  const isOwner = Boolean(user?.id && dynamo.user_id === user.id);
   const timeStatus = getDynamoTimeStatus(dynamo.created_at, dynamo.expires_at);
   const charsRemaining = 280 - content.length;
   const isOverLimit = charsRemaining < 0;
@@ -54,6 +55,11 @@ export const ReplyModal: React.FC<ReplyModalProps> = ({
     if (isSubmitting) return;
 
     setError(null);
+
+    if (isOwner) {
+      setError('No puedes responder a tu propio Dynamo.');
+      return;
+    }
 
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       setError('Sin conexión. Inténtalo nuevamente cuando tengas internet.');
@@ -199,8 +205,13 @@ export const ReplyModal: React.FC<ReplyModalProps> = ({
           </div>
         </div>
 
-        {/* Expiration, moderation or general error notice */}
-        {isHiddenByModeration ? (
+        {/* Expiration, moderation, ownership or general error notice */}
+        {isOwner ? (
+          <div className="rounded-xl bg-amber-500/10 border border-amber-500/30 p-2.5 text-xs text-amber-300 flex items-center gap-2 my-2 shrink-0">
+            <Info className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>No puedes responder a tu propio Dynamo.</span>
+          </div>
+        ) : isHiddenByModeration ? (
           <div className="rounded-xl bg-red-950/40 border border-red-500/40 p-2.5 text-xs text-red-300 flex items-center gap-2 my-2 shrink-0">
             <Shield className="w-4 h-4 text-red-400 shrink-0" />
             <span>Contenido ocultado por moderación. No se admiten respuestas.</span>
@@ -218,7 +229,7 @@ export const ReplyModal: React.FC<ReplyModalProps> = ({
         ) : null}
 
         {/* Reply submission form */}
-        {!timeStatus.isExpired && !isHiddenByModeration && (
+        {!timeStatus.isExpired && !isHiddenByModeration && !isOwner && (
           <form onSubmit={handleSubmit} className="space-y-2 pt-3 border-t border-[#1F2730] shrink-0">
             <div className="relative">
               <textarea

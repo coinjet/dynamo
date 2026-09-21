@@ -41,6 +41,11 @@ export const repliesService = {
     }
 
     if (isSupabaseConfigured) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user && !user.email_confirmed_at && !(user as any).confirmed_at) {
+        throw new Error('Confirma tu correo para activar tu cuenta de Dynamo antes de responder.');
+      }
+
       // First verify that target dynamo is active & not expired & not hidden
       const { data: targetDynamo, error: checkError } = await supabase
         .from('dynamos')
@@ -58,6 +63,11 @@ export const repliesService = {
         new Date(targetDynamo.expires_at).getTime() <= Date.now()
       ) {
         throw new Error('No se puede responder a un Dynamo expirado o inactivo por moderación.');
+      }
+
+      // Strict check: Users cannot reply to their own dynamos
+      if (targetDynamo.user_id === author.id) {
+        throw new Error('No puedes responder a tu propio Dynamo.');
       }
 
       // Check bidirectional block with dynamo author
@@ -104,6 +114,9 @@ export const repliesService = {
         new Date(target.expires_at).getTime() <= Date.now()
       ) {
         throw new Error('No se puede responder a un Dynamo expirado u oculto por moderación.');
+      }
+      if (target.user_id === author.id) {
+        throw new Error('No puedes responder a tu propio Dynamo.');
       }
       target.replies_count = (target.replies_count || 0) + 1;
       localStorage.setItem(LOCAL_STORAGE_DYNAMOS_KEY, JSON.stringify(dynamos));

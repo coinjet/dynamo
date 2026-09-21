@@ -290,6 +290,11 @@ export const dynamosService = {
     const validImageUrl = dto.image_url && dto.image_url.trim() ? dto.image_url.trim() : null;
 
     if (isSupabaseConfigured) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user && !user.email_confirmed_at && !(user as any).confirmed_at) {
+        throw new Error('Confirma tu correo para activar tu cuenta de Dynamo antes de publicar.');
+      }
+
       // Expiration is calculated and strictly controlled server-side by PostgreSQL trigger trg_set_dynamo_creation_defaults()
       const { data, error } = await supabase
         .from('dynamos')

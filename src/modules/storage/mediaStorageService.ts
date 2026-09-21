@@ -268,4 +268,111 @@ export const mediaStorageService = {
     if (url.includes(`/${MEDIA_CONFIG.STORAGE_BUCKET}/`)) return true;
     return false;
   },
+
+  /**
+   * Upload user avatar:
+   * - Validates format, size, MIME type and magic bytes (JPG, PNG, WEBP, max 5MB)
+   * - Strips EXIF/metadata via canvas re-encoding
+   * - Saves in path avatars/<userId>/<timestamp>_<random>.<ext>
+   * - If previousAvatarUrl belongs to user's storage avatars, deletes old object to prevent orphans
+   */
+  async uploadAvatarImage(file: File, userId: string, previousAvatarUrl?: string): Promise<string> {
+    if (!userId) {
+      throw new Error('Se requiere un usuario autenticado para subir un avatar.');
+    }
+
+    const validation = await this.validateImageFile(file);
+    if (!validation.valid) {
+      throw new Error(validation.error || 'Archivo de avatar no válido.');
+    }
+
+    const mime = validation.detectedMime || file.type;
+    const cleanExt = validation.cleanExtension || 'jpg';
+
+    // Strip EXIF / GPS metadata
+    const sanitizedBlob = await stripExifAndSanitize(file, mime);
+
+    // Random collision-resistant filename
+    const randomEntropy = Math.random().toString(36).substring(2, 10);
+    const safeFilename = `${Date.now()}_${randomEntropy}.${cleanExt}`;
+    const storagePath = `avatars/${userId}/${safeFilename}`;
+
+    if (isSupabaseConfigured) {
+      const { error: uploadError } = await supabase.storage
+        .from(MEDIA_CONFIG.STORAGE_BUCKET)
+        .upload(storagePath, sanitizedBlob, {
+          contentType: mime,
+          upsert: false,
+        });
+
+      if (uploadError) {
+        throw new Error(`Error al subir avatar: ${uploadError.message}`);
+      }
+
+      const { data: publicUrlData } = supabase.storage
+        .from(MEDIA_CONFIG.STORAGE_BUCKET)
+        .getPublicUrl(storagePath);
+
+      // Clean up previous avatar if it was stored in user's avatar storage folder
+      if (previousAvatarUrl) {
+        await this.deleteAvatarImage(previousAvatarUrl, userId);
+      }
+
+      return publicUrlData.publicUrl;
+    }
+
+    // Local development fallback
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error('Error al procesar el avatar localmente'));
+      reader.readAsDataURL(sanitizedBlob);
+    });
+  },
+
+  /**
+   * Safely deletes an avatar from Supabase Storage.
+   * Checks ownership and prevents deletion of arbitrary files.
+   */
+  async deleteAvatarImage(avatarUrl: string, userId: string): Promise<boolean> {
+    if (!avatarUrl || !isSupabaseConfigured) {
+      return false;
+    }
+
+    try {
+      const bucketMarker = `/${MEDIA_CONFIG.STORAGE_BUCKET}/`;
+      const markerIndex = avatarUrl.indexOf(bucketMarker);
+      if (markerIndex === -1) {
+        return false;
+      }
+
+      const pathAfterBucket = decodeURIComponent(avatarUrl.substring(markerIndex + bucketMarker.length));
+      
+      // Strict ownership check: Must be inside avatars/<userId>/ folder
+      if (!pathAfterBucket.startsWith(`avatars/${userId}/`)) {
+        return false;
+      }
+
+      const { error } = await supabase.storage
+        .from(MEDIA_CONFIG.STORAGE_BUCKET)
+        .remove([pathAfterBucket]);
+
+      return !error;
+    } catch (err) {
+      console.warn('Error deleting avatar from Supabase storage:', err);
+      return false;
+    }
+  },
+
+  /**
+   * Validates whether an avatar URL is trusted (storage bucket, preset, or dicebear geometric)
+   */
+  isTrustedAvatarUrl(url: string): boolean {
+    if (!url) return true;
+    if (!isSupabaseConfigured && url.startsWith('data:image/')) return true;
+    if (url.includes(`/${MEDIA_CONFIG.STORAGE_BUCKET}/avatars/`)) return true;
+    if (url.startsWith('https://images.unsplash.com/')) return true;
+    if (url.startsWith('https://api.dicebear.com/')) return true;
+    return false;
+  },
 };

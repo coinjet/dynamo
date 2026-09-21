@@ -43,8 +43,9 @@ export const authService = {
 
         const profile = await profilesService.getProfile(session.user.id);
         if (profile) {
+          const email_confirmed_at = session.user.email_confirmed_at || (session.user as any).confirmed_at || null;
           return {
-            user: { id: session.user.id, email: session.user.email },
+            user: { id: session.user.id, email: session.user.email, email_confirmed_at },
             profile,
           };
         }
@@ -180,8 +181,9 @@ export const authService = {
             status: 'active',
           };
 
+      const email_confirmed_at = data.user.email_confirmed_at || (data.user as any).confirmed_at || null;
       return {
-        user: { id: data.user.id, email: data.user.email },
+        user: { id: data.user.id, email: data.user.email, email_confirmed_at },
         profile,
       };
     }
@@ -199,7 +201,7 @@ export const authService = {
     };
 
     const session: AuthSession = {
-      user: { id: newId, email: params.email.trim() },
+      user: { id: newId, email: params.email.trim(), email_confirmed_at: new Date().toISOString() },
       profile: newProfile,
     };
 
@@ -252,15 +254,16 @@ export const authService = {
         throw new Error('Esta cuenta ha sido suspendida por el equipo de moderación debido a infracciones de las Normas de la Comunidad.');
       }
 
+      const email_confirmed_at = data.user.email_confirmed_at || (data.user as any).confirmed_at || null;
       return {
-        user: { id: data.user.id, email: data.user.email },
+        user: { id: data.user.id, email: data.user.email, email_confirmed_at },
         profile,
       };
     }
 
     // Local Sandbox sign in
     const session: AuthSession = {
-      user: { id: DEFAULT_DEMO_USER.id, email },
+      user: { id: DEFAULT_DEMO_USER.id, email, email_confirmed_at: new Date().toISOString() },
       profile: {
         ...DEFAULT_DEMO_USER,
         username: email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '') || DEFAULT_DEMO_USER.username,
@@ -268,6 +271,47 @@ export const authService = {
     };
     localStorage.setItem(LOCAL_STORAGE_SESSION_KEY, JSON.stringify(session));
     return session;
+  },
+
+  /**
+   * Resend confirmation email via Supabase Auth.
+   */
+  async resendConfirmationEmail(email: string): Promise<void> {
+    const trimmed = email.trim();
+    if (!trimmed) {
+      throw new Error('Correo electrónico no especificado.');
+    }
+    if (isSupabaseConfigured) {
+      const redirectUrl = window.location.origin;
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: trimmed,
+        options: {
+          emailRedirectTo: redirectUrl,
+        },
+      });
+      if (error) {
+        throw new Error(error.message || 'No se pudo reenviar el correo de confirmación.');
+      }
+    }
+  },
+
+  /**
+   * Checks directly with Supabase whether current user's email is confirmed.
+   */
+  async checkEmailConfirmation(): Promise<{ isConfirmed: boolean; email_confirmed_at: string | null }> {
+    if (!isSupabaseConfigured) {
+      return { isConfirmed: true, email_confirmed_at: new Date().toISOString() };
+    }
+    const { data, error } = await supabase.auth.getUser();
+    if (error || !data.user) {
+      return { isConfirmed: false, email_confirmed_at: null };
+    }
+    const confirmedAt = data.user.email_confirmed_at || (data.user as any).confirmed_at || null;
+    return {
+      isConfirmed: Boolean(confirmedAt),
+      email_confirmed_at: confirmedAt,
+    };
   },
 
   /**

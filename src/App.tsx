@@ -9,6 +9,7 @@ import { DynamoCard } from '@/src/components/dynamos/DynamoCard';
 import { CreateDynamoModal } from '@/src/components/dynamos/CreateDynamoModal';
 import { ReplyModal } from '@/src/components/replies/ReplyModal';
 import { AuthModal } from '@/src/components/auth/AuthModal';
+import { EmailConfirmationGate } from '@/src/components/auth/EmailConfirmationGate';
 import { NotificationsModal } from '@/src/components/notifications/NotificationsModal';
 import { GlobalBanner } from '@/src/components/common/GlobalBanner';
 import {
@@ -48,7 +49,15 @@ const ReportModal = React.lazy(() => import('@/src/components/moderation/ReportM
 const PAGE_SIZE = 20;
 
 function DynamoAppContent() {
-  const { user, profile, isRecoveryMode } = useAuth();
+  const {
+    user,
+    profile,
+    isRecoveryMode,
+    isEmailConfirmed,
+    resendConfirmationEmail,
+    checkEmailConfirmation,
+    signOut,
+  } = useAuth();
 
   // Navigation & View State
   const [currentTab, setCurrentTab] = useState<'feed' | 'discovery' | 'best-dynamos' | 'landing' | 'profile' | 'admin' | 'settings' | 'not-found'>('feed');
@@ -102,10 +111,26 @@ function DynamoAppContent() {
 
   const handleGoToHome = () => {
     setSelectedTag(null);
-    setCurrentTab('feed');
-    if (window.location.pathname !== '/') {
+    if (window.location.pathname !== '/' || window.location.hash) {
       window.history.pushState(null, '', '/');
     }
+    setCurrentTab('feed');
+  };
+
+  const navigateToTab = (tab: 'feed' | 'discovery' | 'best-dynamos' | 'landing' | 'profile' | 'admin' | 'settings') => {
+    setSelectedTag(null);
+    if (tab === 'admin') {
+      handleGoToAdmin();
+      return;
+    }
+    if (tab === 'settings') {
+      handleGoToSettings();
+      return;
+    }
+    if (window.location.pathname === '/admin' || window.location.pathname === '/settings' || window.location.hash) {
+      window.history.pushState(null, '', '/');
+    }
+    setCurrentTab(tab);
   };
 
   // Modals
@@ -188,8 +213,14 @@ function DynamoAppContent() {
   useEffect(() => {
     if (user?.id) {
       loadNotifications();
+      const unsubscribe = notificationsService.subscribeToUserNotifications(user.id, () => {
+        loadNotifications();
+      });
+      return () => {
+        unsubscribe();
+      };
     }
-  }, [user]);
+  }, [user?.id]);
 
   // Handle gifting energy without full page reload
   const handleGiftEnergy = async (dynamoId: string) => {
@@ -363,16 +394,26 @@ function DynamoAppContent() {
       )}
 
       {/* Main Container */}
-      <main className="flex-1 w-full max-w-4xl mx-auto px-4 sm:px-6 py-4 sm:py-6 pb-24 sm:pb-12">
-        {/* Navigation Tabs Header (Desktop / Tablet) */}
+      {user && !isEmailConfirmed && !isRecoveryMode ? (
+        <main className="flex-1 w-full max-w-4xl mx-auto px-4 sm:px-6 py-8">
+          <EmailConfirmationGate
+            email={user.email || ''}
+            onResend={resendConfirmationEmail}
+            onCheckConfirmation={checkEmailConfirmation}
+            onSignOut={signOut}
+          />
+          <PublicFooter onOpenLegalDoc={handleOpenLegalDoc} />
+        </main>
+      ) : (
+        <main className="flex-1 w-full max-w-4xl mx-auto px-4 sm:px-6 py-4 sm:py-6 pb-24 sm:pb-12">
+          {/* Navigation Tabs Header (Desktop / Tablet) */}
         <div className="hidden sm:flex items-center justify-between mb-6 pb-3 border-b border-[#1F262E]">
           <div className="flex items-center gap-1 bg-[#13181E] p-1 rounded-xl border border-[#21272E]">
             <button
               id="desktop-tab-feed"
               onClick={() => {
-                setSelectedTag(null);
                 setDiscoveryHashtag(null);
-                setCurrentTab('feed');
+                navigateToTab('feed');
               }}
               className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition ${
                 currentTab === 'feed'
@@ -387,7 +428,7 @@ function DynamoAppContent() {
               onClick={() => {
                 setDiscoveryHashtag(null);
                 setDiscoveryInitialSection('tendencias');
-                setCurrentTab('discovery');
+                navigateToTab('discovery');
               }}
               className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition flex items-center gap-1.5 ${
                 currentTab === 'discovery'
@@ -400,7 +441,7 @@ function DynamoAppContent() {
             </button>
             <button
               id="desktop-tab-best-dynamos"
-              onClick={() => setCurrentTab('best-dynamos')}
+              onClick={() => navigateToTab('best-dynamos')}
               className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition flex items-center gap-1.5 ${
                 currentTab === 'best-dynamos'
                   ? 'bg-amber-500 text-black shadow-sm'
@@ -412,7 +453,7 @@ function DynamoAppContent() {
             </button>
             <button
               id="desktop-tab-manifesto"
-              onClick={() => setCurrentTab('landing')}
+              onClick={() => navigateToTab('landing')}
               className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition ${
                 currentTab === 'landing'
                   ? 'bg-amber-500 text-black shadow-sm'
@@ -424,7 +465,7 @@ function DynamoAppContent() {
             {user && (
               <button
                 id="desktop-tab-profile"
-                onClick={() => setCurrentTab('profile')}
+                onClick={() => navigateToTab('profile')}
                 className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition ${
                   currentTab === 'profile'
                     ? 'bg-amber-500 text-black shadow-sm'
@@ -754,38 +795,33 @@ function DynamoAppContent() {
         {/* Public Footer */}
         <PublicFooter onOpenLegalDoc={handleOpenLegalDoc} />
       </main>
+      )}
 
       {/* Offline Banner Indicator & PWA Update Notification */}
       <OfflineIndicator />
       <ReloadPrompt />
 
       {/* Bottom Nav for Mobile */}
-      <BottomNav
-        currentTab={currentTab === 'admin' ? 'feed' : currentTab}
-        onSelectTab={(tab) => {
-          setSelectedTag(null);
-          if (tab === 'discovery') {
-            setDiscoveryHashtag(null);
-            setDiscoveryInitialSection('tendencias');
-          }
-          if (tab === 'settings') {
-            handleGoToSettings();
-            return;
-          }
-          if (window.location.pathname === '/admin' || window.location.pathname === '/settings') {
-            window.history.pushState(null, '', '/');
-          }
-          setCurrentTab(tab);
-        }}
-        onOpenCreateModal={() => {
-          if (!user) {
-            setAuthModalMode('login');
-            setIsAuthModalOpen(true);
-          } else {
-            setIsCreateModalOpen(true);
-          }
-        }}
-      />
+      {(!user || isEmailConfirmed || isRecoveryMode) && (
+        <BottomNav
+          currentTab={currentTab === 'admin' ? 'feed' : currentTab}
+          onSelectTab={(tab) => {
+            if (tab === 'discovery') {
+              setDiscoveryHashtag(null);
+              setDiscoveryInitialSection('tendencias');
+            }
+            navigateToTab(tab);
+          }}
+          onOpenCreateModal={() => {
+            if (!user) {
+              setAuthModalMode('login');
+              setIsAuthModalOpen(true);
+            } else {
+              setIsCreateModalOpen(true);
+            }
+          }}
+        />
+      )}
 
       {/* Modals */}
       <CreateDynamoModal

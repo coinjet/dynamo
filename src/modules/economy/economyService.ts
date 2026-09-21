@@ -99,6 +99,11 @@ export const economyService = {
     giverId: string
   ): Promise<GiftEnergyEconomyResult> {
     if (isSupabaseConfigured) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user && !user.email_confirmed_at && !(user as any).confirmed_at) {
+        throw new Error('Confirma tu correo para activar tu cuenta de Dynamo antes de regalar energía.');
+      }
+
       const { data, error } = await supabase.rpc('gift_energy_to_dynamo', {
         p_dynamo_id: dynamoId,
       });

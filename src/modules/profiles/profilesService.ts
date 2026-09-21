@@ -4,6 +4,7 @@ import {
   validateUsername,
   sanitizeAndValidateBio,
 } from '@/src/modules/auth/authValidation';
+import { mediaStorageService } from '@/src/modules/storage/mediaStorageService';
 
 const LOCAL_STORAGE_PROFILES_KEY = 'dynamo_mock_profiles_store';
 
@@ -38,7 +39,7 @@ export const profilesService = {
         .from('profiles')
         .select('id, username, avatar, bio, created_at, role, status')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
 
       if (error || !data) return null;
       return data as Profile;
@@ -55,7 +56,7 @@ export const profilesService = {
         .from('profiles')
         .select('id, username, avatar, bio, created_at, role, status')
         .ilike('username', cleanUsername)
-        .single();
+        .maybeSingle();
 
       if (error || !data) return null;
       return data as Profile;
@@ -130,7 +131,11 @@ export const profilesService = {
 
     // 3. Avatar update
     if (updates.avatar !== undefined) {
-      payload.avatar = updates.avatar.trim();
+      const cleanAvatar = updates.avatar.trim();
+      if (cleanAvatar && !mediaStorageService.isTrustedAvatarUrl(cleanAvatar)) {
+        throw new Error('Solo se permiten avatares subidos a Dynamo o avatares predeterminados.');
+      }
+      payload.avatar = cleanAvatar;
     }
 
     if (isSupabaseConfigured) {
@@ -140,7 +145,7 @@ export const profilesService = {
         .update(payload)
         .eq('id', userId)
         .select('id, username, avatar, bio, created_at, role, status')
-        .single();
+        .maybeSingle();
 
       if (error) {
         throw new Error(error.message);

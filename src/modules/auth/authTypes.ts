@@ -12,6 +12,7 @@ export interface AuthSession {
   user: {
     id: string;
     email?: string;
+    email_confirmed_at?: string | null;
   };
   profile: UserProfile;
 }
