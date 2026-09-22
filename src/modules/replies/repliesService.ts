@@ -23,6 +23,7 @@ export const repliesService = {
         dynamo_id: r.dynamo_id,
         user_id: r.user_id,
         content: r.content,
+        parent_reply_id: r.parent_reply_id || null,
         status: r.status || 'active',
         created_at: r.created_at,
         author: r.profiles,
@@ -31,7 +32,12 @@ export const repliesService = {
 
     const saved = localStorage.getItem(LOCAL_STORAGE_REPLIES_KEY);
     const list: Reply[] = saved ? JSON.parse(saved) : [];
-    return list.filter((r) => r.dynamo_id === dynamoId && r.status !== 'hidden');
+    return list
+      .filter((r) => r.dynamo_id === dynamoId && r.status !== 'hidden')
+      .map((r) => ({
+        ...r,
+        parent_reply_id: r.parent_reply_id || null,
+      }));
   },
 
   async createReply(dto: CreateReplyDTO, author: Profile): Promise<Reply> {
@@ -40,13 +46,15 @@ export const repliesService = {
       throw new Error('La respuesta debe tener entre 1 y 280 caracteres.');
     }
 
+    let finalParentReplyId: string | null = null;
+
     if (isSupabaseConfigured) {
       const { data: { user } } = await supabase.auth.getUser();
       if (user && !user.email_confirmed_at && !(user as any).confirmed_at) {
         throw new Error('Confirma tu correo para activar tu cuenta de Dynamo antes de responder.');
       }
 
-      // First verify that target dynamo is active & not expired & not hidden
+      // 1. Verify target dynamo is active & not expired & not hidden
       const { data: targetDynamo, error: checkError } = await supabase
         .from('dynamos')
         .select('id, user_id, expires_at, status')
@@ -65,16 +73,59 @@ export const repliesService = {
         throw new Error('No se puede responder a un Dynamo expirado o inactivo por moderación.');
       }
 
-      // Strict check: Users cannot reply to their own dynamos
-      if (targetDynamo.user_id === author.id) {
-        throw new Error('No puedes responder a tu propio Dynamo.');
-      }
-
       // Check bidirectional block with dynamo author
       if (targetDynamo.user_id && targetDynamo.user_id !== author.id) {
-        const isBlocked = await relationshipsService.isBlockedBidirectional(author.id, targetDynamo.user_id);
-        if (isBlocked) {
+        const isBlockedWithDynamoAuthor = await relationshipsService.isBlockedBidirectional(
+          author.id,
+          targetDynamo.user_id
+        );
+        if (isBlockedWithDynamoAuthor) {
           throw new Error('No es posible responder debido a un bloqueo entre ambos usuarios.');
+        }
+      }
+
+      // 2. Validate reply context: Direct Dynamo reply vs Reply-to-reply
+      if (dto.parentReplyId) {
+        // Fetch parent reply to validate belonging, status, and avoid depth > 2
+        const { data: parentReply, error: parentError } = await supabase
+          .from('replies')
+          .select('id, dynamo_id, user_id, status, parent_reply_id')
+          .eq('id', dto.parentReplyId)
+          .single();
+
+        if (parentError || !parentReply) {
+          throw new Error('El comentario al que intentas responder no existe.');
+        }
+
+        if (parentReply.dynamo_id !== dto.dynamoId) {
+          throw new Error('La respuesta no pertenece al mismo Dynamo.');
+        }
+
+        if (parentReply.status !== 'active') {
+          throw new Error('No se puede responder a un comentario moderado o inactivo.');
+        }
+
+        if (parentReply.user_id === author.id) {
+          throw new Error('No puedes responder a tu propio comentario.');
+        }
+
+        // Check bidirectional block with parent comment author
+        const isBlockedWithParentAuthor = await relationshipsService.isBlockedBidirectional(
+          author.id,
+          parentReply.user_id
+        );
+        if (isBlockedWithParentAuthor) {
+          throw new Error('No es posible interactuar con este usuario debido a bloqueos.');
+        }
+
+        // STRICT 2-LEVEL DEPTH CAP:
+        // If parent reply already has a parent_reply_id (i.e. is Level 2),
+        // fold to its root Level 1 parent so new reply remains at Level 2.
+        finalParentReplyId = parentReply.parent_reply_id || parentReply.id;
+      } else {
+        // Direct reply to Dynamo: Dynamo author cannot reply to own Dynamo
+        if (targetDynamo.user_id === author.id) {
+          throw new Error('No puedes responder directamente a tu propio Dynamo.');
         }
       }
 
@@ -84,6 +135,7 @@ export const repliesService = {
           dynamo_id: dto.dynamoId,
           user_id: author.id,
           content: trimmed,
+          parent_reply_id: finalParentReplyId,
           status: 'active',
         })
         .select()
@@ -95,8 +147,10 @@ export const repliesService = {
         }
         throw new Error(error.message);
       }
+
       return {
         ...data,
+        parent_reply_id: data.parent_reply_id || finalParentReplyId,
         status: 'active',
         author,
       };
@@ -115,11 +169,28 @@ export const repliesService = {
       ) {
         throw new Error('No se puede responder a un Dynamo expirado u oculto por moderación.');
       }
-      if (target.user_id === author.id) {
-        throw new Error('No puedes responder a tu propio Dynamo.');
-      }
+
       target.replies_count = (target.replies_count || 0) + 1;
       localStorage.setItem(LOCAL_STORAGE_DYNAMOS_KEY, JSON.stringify(dynamos));
+    }
+
+    const saved = localStorage.getItem(LOCAL_STORAGE_REPLIES_KEY);
+    const list: Reply[] = saved ? JSON.parse(saved) : [];
+
+    let parentReply: Reply | undefined;
+    if (dto.parentReplyId) {
+      parentReply = list.find((r) => r.id === dto.parentReplyId);
+      if (!parentReply) {
+        throw new Error('El comentario al que intentas responder no existe.');
+      }
+      if (parentReply.user_id === author.id) {
+        throw new Error('No puedes responder a tu propio comentario.');
+      }
+      finalParentReplyId = parentReply.parent_reply_id || parentReply.id;
+    } else {
+      if (target && target.user_id === author.id) {
+        throw new Error('No puedes responder directamente a tu propio Dynamo.');
+      }
     }
 
     const newReply: Reply = {
@@ -127,24 +198,44 @@ export const repliesService = {
       dynamo_id: dto.dynamoId,
       user_id: author.id,
       content: trimmed,
+      parent_reply_id: finalParentReplyId,
       status: 'active',
       created_at: new Date().toISOString(),
       author,
     };
 
-    const saved = localStorage.getItem(LOCAL_STORAGE_REPLIES_KEY);
-    const list: Reply[] = saved ? JSON.parse(saved) : [];
     list.push(newReply);
     localStorage.setItem(LOCAL_STORAGE_REPLIES_KEY, JSON.stringify(list));
 
-    // Emit notification to dynamo author if not replying to oneself
-    if (target && target.user_id && target.user_id !== author.id) {
+    // Emit exactly ONE notification to the relevant recipient:
+    // If reply-to-reply: Notify author of the parent reply
+    // If direct reply: Notify author of the Dynamo
+    if (finalParentReplyId && parentReply) {
+      if (parentReply.user_id && parentReply.user_id !== author.id) {
+        notificationsService.createNotification({
+          recipientId: parentReply.user_id,
+          type: 'reply',
+          sender: author,
+          referenceId: dto.dynamoId,
+          metadata: {
+            dynamo_id: dto.dynamoId,
+            reply_id: newReply.id,
+            parent_reply_id: finalParentReplyId,
+            target_type: 'reply',
+          },
+        }).catch(console.error);
+      }
+    } else if (target && target.user_id && target.user_id !== author.id) {
       notificationsService.createNotification({
         recipientId: target.user_id,
         type: 'reply',
         sender: author,
         referenceId: dto.dynamoId,
-        metadata: { dynamo_id: dto.dynamoId, reply_id: newReply.id },
+        metadata: {
+          dynamo_id: dto.dynamoId,
+          reply_id: newReply.id,
+          target_type: 'dynamo',
+        },
       }).catch(console.error);
     }
 

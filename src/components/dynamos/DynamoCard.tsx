@@ -366,26 +366,14 @@ export const DynamoCard: React.FC<DynamoCardProps> = ({
             <span className="hidden sm:inline">⚡</span>
           </button>
 
-          {/* Responder Button */}
+          {/* Responder / Ver Conversación Button */}
           <button
             id={`btn-reply-${dynamo.id}`}
-            onClick={() => {
-              if (isOwner) {
-                setGiftFeedback({
-                  type: 'info',
-                  message: 'No puedes responder a tu propio Dynamo.',
-                });
-                setTimeout(() => setGiftFeedback(null), 3500);
-                return;
-              }
-              onOpenReply(dynamo);
-            }}
+            onClick={() => onOpenReply(dynamo)}
             disabled={isExpired || isHidden}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border transition ${
               isExpired || isHidden
                 ? 'opacity-40 cursor-not-allowed text-stone-400 border-stone-800'
-                : isOwner
-                ? 'border-stone-800/80 bg-stone-900/30 text-stone-400 hover:text-stone-300'
                 : 'border-stone-800 hover:border-stone-700 hover:bg-stone-800/60 text-stone-300 hover:text-white'
             }`}
             title={
@@ -394,8 +382,8 @@ export const DynamoCard: React.FC<DynamoCardProps> = ({
                 : isExpired
                 ? 'Dynamo expirado'
                 : isOwner
-                ? 'No puedes responder a tu propio Dynamo'
-                : 'Responder'
+                ? 'Ver conversación y participar'
+                : 'Ver conversación y responder'
             }
           >
             <MessageSquare className="w-3.5 h-3.5" />

@@ -516,6 +516,38 @@ export const dynamosService = {
     return current.filter((d) => d.user_id === userId);
   },
 
+  async getDynamoById(dynamoId: string): Promise<Dynamo | null> {
+    if (isSupabaseConfigured) {
+      try {
+        const { data, error } = await supabase
+          .from('dynamos')
+          .select('*, author:user_id (*)')
+          .eq('id', dynamoId)
+          .maybeSingle();
+
+        if (error || !data) return null;
+        return {
+          id: data.id,
+          user_id: data.user_id,
+          content: data.content,
+          image_url: data.image_url,
+          created_at: data.created_at,
+          expires_at: data.expires_at,
+          status: data.status,
+          hashtags: data.hashtags || [],
+          energy_gifts_count: data.energy_gifts_count || 0,
+          replies_count: data.replies_count || 0,
+          author: (data as any).author,
+        };
+      } catch (err) {
+        console.warn('Error fetching single dynamo by ID:', err);
+      }
+    }
+
+    const current = getStoredDynamos();
+    return current.find((d) => d.id === dynamoId) || null;
+  },
+
   async deleteDynamo(dynamoId: string, userId: string): Promise<boolean> {
     if (isSupabaseConfigured) {
       // First fetch to check if the dynamo has an attached image

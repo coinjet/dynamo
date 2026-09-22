@@ -67,10 +67,14 @@ export const notificationsService = {
                   title = '¡Energía Recibida! ⚡';
                   description = `${senderUsername} inyectó +6 horas de vida a tu Dynamo.`;
                   break;
-                case 'reply':
+                case 'reply': {
+                  const isReplyToReply = n.metadata?.target_type === 'reply' || Boolean(n.metadata?.parent_reply_id);
                   title = 'Nueva respuesta 💬';
-                  description = `${senderUsername} respondió a tu Dynamo.`;
+                  description = isReplyToReply
+                    ? `${senderUsername} respondió a tu respuesta.`
+                    : `${senderUsername} respondió a tu Dynamo.`;
                   break;
+                }
                 case 'follow':
                   title = 'Nuevo seguidor 👤';
                   description = `${senderUsername} ha comenzado a seguirte.`;
@@ -226,10 +230,14 @@ export const notificationsService = {
           title = '¡Energía Recibida! ⚡';
           description = `${senderUsername} inyectó +6 horas de vida a tu Dynamo.`;
           break;
-        case 'reply':
+        case 'reply': {
+          const isReplyToReply = metadata?.target_type === 'reply' || Boolean(metadata?.parent_reply_id);
           title = 'Nueva respuesta 💬';
-          description = `${senderUsername} respondió a tu Dynamo.`;
+          description = isReplyToReply
+            ? `${senderUsername} respondió a tu respuesta.`
+            : `${senderUsername} respondió a tu Dynamo.`;
           break;
+        }
         case 'follow':
           title = 'Nuevo seguidor 👤';
           description = `${senderUsername} ha comenzado a seguirte.`;

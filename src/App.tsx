@@ -24,6 +24,7 @@ import { dynamosService } from '@/src/modules/dynamos/dynamosService';
 import { hashtagsService } from '@/src/modules/hashtags/hashtagsService';
 import { notificationsService } from '@/src/modules/notifications/notificationsService';
 import { repliesService } from '@/src/modules/replies/repliesService';
+import { profilesService } from '@/src/modules/profiles/profilesService';
 import { Dynamo } from '@/src/modules/dynamos/dynamosTypes';
 import { Hashtag } from '@/src/modules/hashtags/hashtagsTypes';
 import { Notification } from '@/src/modules/notifications/notificationsTypes';
@@ -136,6 +137,7 @@ function DynamoAppContent() {
   // Modals
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [activeReplyDynamo, setActiveReplyDynamo] = useState<Dynamo | null>(null);
+  const [focusedReplyId, setFocusedReplyId] = useState<string | null>(null);
   const [activeProfileModal, setActiveProfileModal] = useState<Profile | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<'login' | 'register' | 'forgot_password' | 'reset_password'>('login');
@@ -273,7 +275,7 @@ function DynamoAppContent() {
   };
 
   // Handle sending a reply
-  const handleSubmitReply = async (dynamoId: string, content: string) => {
+  const handleSubmitReply = async (dynamoId: string, content: string, parentReplyId?: string | null) => {
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       throw new Error('Sin conexión. Inténtalo nuevamente cuando tengas internet.');
     }
@@ -284,7 +286,7 @@ function DynamoAppContent() {
       throw new Error('Inicia sesión para responder');
     }
 
-    await repliesService.createReply({ dynamoId, content }, profile);
+    await repliesService.createReply({ dynamoId, content, parentReplyId }, profile);
     setDynamos((prev) =>
       prev.map((d) =>
         d.id === dynamoId
@@ -320,14 +322,75 @@ function DynamoAppContent() {
     }
   };
 
-  const handleNavigateNotificationContext = (notification: Notification) => {
+  const handleNavigateNotificationContext = async (notification: Notification) => {
     setIsNotificationsOpen(false);
-    if (notification.reference_id) {
-      const targetDynamo = dynamos.find((d) => d.id === notification.reference_id);
-      if (targetDynamo) {
-        setActiveReplyDynamo(targetDynamo);
+
+    // 1. Follow notification: Open follower's profile directly
+    if (notification.type === 'follow') {
+      if (notification.sender) {
+        setActiveProfileModal(notification.sender);
+        return;
       }
-    } else if (notification.sender) {
+      const targetUserId =
+        notification.sender_id ||
+        notification.metadata?.follower_id ||
+        notification.reference_id;
+      if (targetUserId) {
+        const p = await profilesService.getProfile(targetUserId);
+        if (p) {
+          setActiveProfileModal(p);
+          return;
+        }
+      }
+      return;
+    }
+
+    // 2. Gift notification: Open target Dynamo
+    if (notification.type === 'gift') {
+      const dynamoId = notification.metadata?.dynamo_id || notification.reference_id;
+      if (dynamoId) {
+        let targetDynamo = dynamos.find((d) => d.id === dynamoId);
+        if (!targetDynamo) {
+          targetDynamo = (await dynamosService.getDynamoById(dynamoId)) || undefined;
+        }
+        if (targetDynamo) {
+          setFocusedReplyId(null);
+          setActiveReplyDynamo(targetDynamo);
+        }
+      }
+      return;
+    }
+
+    // 3. Reply notification (direct or reply-to-reply): Open Dynamo + focus the specific reply
+    if (notification.type === 'reply') {
+      const dynamoId = notification.metadata?.dynamo_id || notification.reference_id;
+      const targetReplyId = notification.metadata?.reply_id;
+      if (dynamoId) {
+        let targetDynamo = dynamos.find((d) => d.id === dynamoId);
+        if (!targetDynamo) {
+          targetDynamo = (await dynamosService.getDynamoById(dynamoId)) || undefined;
+        }
+        if (targetDynamo) {
+          setFocusedReplyId(targetReplyId || null);
+          setActiveReplyDynamo(targetDynamo);
+        }
+      }
+      return;
+    }
+
+    // Fallback:
+    if (notification.reference_id) {
+      let targetDynamo = dynamos.find((d) => d.id === notification.reference_id);
+      if (!targetDynamo) {
+        targetDynamo = (await dynamosService.getDynamoById(notification.reference_id)) || undefined;
+      }
+      if (targetDynamo) {
+        setFocusedReplyId(null);
+        setActiveReplyDynamo(targetDynamo);
+        return;
+      }
+    }
+    if (notification.sender) {
       setActiveProfileModal(notification.sender);
     }
   };
@@ -833,11 +896,16 @@ function DynamoAppContent() {
       <ReplyModal
         isOpen={Boolean(activeReplyDynamo)}
         dynamo={activeReplyDynamo}
-        onClose={() => setActiveReplyDynamo(null)}
+        onClose={() => {
+          setActiveReplyDynamo(null);
+          setFocusedReplyId(null);
+        }}
         onSubmitReply={handleSubmitReply}
         onReportReply={(replyId, authorId) => {
           setReportingTarget({ replyId, authorId });
         }}
+        focusedReplyId={focusedReplyId}
+        onClearFocusedReply={() => setFocusedReplyId(null)}
       />
 
       <AuthModal
