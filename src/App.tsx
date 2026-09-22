@@ -34,6 +34,7 @@ import { Profile } from '@/src/modules/profiles/profilesTypes';
 import { PublicFooter } from '@/src/components/layout/PublicFooter';
 import { LegalDocsModal, LegalDocType } from '@/src/components/legal/LegalDocsModal';
 import { authService } from '@/src/modules/auth/authService';
+import { relationshipsService } from '@/src/modules/relationships/relationshipsService';
 import { Zap, Plus, RefreshCw, Sparkles, AlertTriangle, CheckCircle2, Users, UserCheck, Flame, Shield, Trophy, Settings, ShieldAlert } from 'lucide-react';
 
 // Code-split heavy modules with React.lazy
@@ -46,6 +47,8 @@ const SettingsView = React.lazy(() => import('@/src/components/settings/Settings
 const UserProfileModal = React.lazy(() => import('@/src/components/profiles/UserProfileModal').then((m) => ({ default: m.UserProfileModal })));
 const EconomyModal = React.lazy(() => import('@/src/components/economy/EconomyModal').then((m) => ({ default: m.EconomyModal })));
 const ReportModal = React.lazy(() => import('@/src/components/moderation/ReportModal').then((m) => ({ default: m.ReportModal })));
+const SingleDynamoView = React.lazy(() => import('@/src/components/dynamos/SingleDynamoView').then((m) => ({ default: m.SingleDynamoView })));
+const PublicProfileView = React.lazy(() => import('@/src/components/profiles/PublicProfileView').then((m) => ({ default: m.PublicProfileView })));
 
 const PAGE_SIZE = 20;
 
@@ -61,25 +64,68 @@ function DynamoAppContent() {
   } = useAuth();
 
   // Navigation & View State
-  const [currentTab, setCurrentTab] = useState<'feed' | 'discovery' | 'best-dynamos' | 'landing' | 'profile' | 'admin' | 'settings' | 'not-found'>('feed');
+  const [currentTab, setCurrentTab] = useState<'feed' | 'discovery' | 'best-dynamos' | 'landing' | 'profile' | 'admin' | 'settings' | 'single-dynamo' | 'public-profile' | 'not-found'>('feed');
+  const [activeDynamoId, setActiveDynamoId] = useState<string | null>(null);
+  const [activeUsername, setActiveUsername] = useState<string | null>(null);
+  const [pendingNewDynamos, setPendingNewDynamos] = useState<Dynamo[]>([]);
   const [discoveryInitialSection, setDiscoveryInitialSection] = useState<DiscoverySection>('tendencias');
   const [discoveryHashtag, setDiscoveryHashtag] = useState<string | null>(null);
 
-  // Sync /admin, /settings and 404 URL paths and hash
+  // Sync URL paths and hash (/admin, /settings, /d/:id, /@username, etc.)
   useEffect(() => {
     const handleUrlChange = () => {
       const path = window.location.pathname;
       const hash = window.location.hash;
+      const cleanHash = hash.replace(/^#\/?/, '');
+
+      // 1. Single Dynamo: /d/:id or #/d/:id
+      const dynamoMatch = path.match(/^\/d\/([a-zA-Z0-9_-]+)/) || cleanHash.match(/^d\/([a-zA-Z0-9_-]+)/);
+      if (dynamoMatch) {
+        setActiveDynamoId(dynamoMatch[1]);
+        setCurrentTab('single-dynamo');
+        return;
+      }
+
+      // 2. Public Profile: /@username or #/@username
+      const profileMatch = path.match(/^\/@([a-zA-Z0-9_.-]+)/) || cleanHash.match(/^@([a-zA-Z0-9_.-]+)/);
+      if (profileMatch) {
+        setActiveUsername(profileMatch[1]);
+        setCurrentTab('public-profile');
+        return;
+      }
+
+      // 3. /admin
       if (path === '/admin' || hash === '#/admin' || hash === '#admin') {
         setCurrentTab('admin');
-      } else if (path === '/settings' || hash === '#/settings' || hash === '#settings') {
-        setCurrentTab('settings');
-      } else if (path === '/' || path === '') {
-        setCurrentTab((prev) => (prev === 'admin' || prev === 'settings' || prev === 'not-found' ? 'feed' : prev));
-      } else {
-        // Unknown path -> 404
-        setCurrentTab('not-found');
+        return;
       }
+
+      // 4. /settings
+      if (path === '/settings' || hash === '#/settings' || hash === '#settings') {
+        setCurrentTab('settings');
+        return;
+      }
+
+      // 5. /discovery
+      if (path === '/discovery' || hash === '#/discovery') {
+        setCurrentTab('discovery');
+        return;
+      }
+
+      // 6. /best-dynamos
+      if (path === '/best-dynamos' || hash === '#/best-dynamos') {
+        setCurrentTab('best-dynamos');
+        return;
+      }
+
+      // 7. Feed / root
+      if (path === '/' || path === '/feed' || path === '' || hash === '#/feed') {
+        setCurrentTab((prev) => (prev === 'admin' || prev === 'settings' || prev === 'not-found' || prev === 'single-dynamo' || prev === 'public-profile' ? 'feed' : prev));
+        return;
+      }
+
+      // 8. Unknown path -> 404
+      setCurrentTab('not-found');
     };
 
     handleUrlChange();
@@ -91,7 +137,26 @@ function DynamoAppContent() {
     };
   }, []);
 
+  const handleOpenPublicProfile = (targetUsername: string) => {
+    const clean = targetUsername.replace(/^@/, '');
+    setActiveUsername(clean);
+    setCurrentTab('public-profile');
+    if (window.location.pathname !== `/@${clean}`) {
+      window.history.pushState(null, '', `/@${clean}`);
+    }
+  };
+
+  const handleOpenSingleDynamo = (dynamoId: string) => {
+    setActiveDynamoId(dynamoId);
+    setCurrentTab('single-dynamo');
+    if (window.location.pathname !== `/d/${dynamoId}`) {
+      window.history.pushState(null, '', `/d/${dynamoId}`);
+    }
+  };
+
   const handleGoToAdmin = () => {
+    setActiveDynamoId(null);
+    setActiveUsername(null);
     setCurrentTab('admin');
     if (window.location.pathname !== '/admin') {
       window.history.pushState(null, '', '/admin');
@@ -104,6 +169,8 @@ function DynamoAppContent() {
       setIsAuthModalOpen(true);
       return;
     }
+    setActiveDynamoId(null);
+    setActiveUsername(null);
     setCurrentTab('settings');
     if (window.location.pathname !== '/settings') {
       window.history.pushState(null, '', '/settings');
@@ -112,6 +179,8 @@ function DynamoAppContent() {
 
   const handleGoToHome = () => {
     setSelectedTag(null);
+    setActiveDynamoId(null);
+    setActiveUsername(null);
     if (window.location.pathname !== '/' || window.location.hash) {
       window.history.pushState(null, '', '/');
     }
@@ -120,6 +189,8 @@ function DynamoAppContent() {
 
   const navigateToTab = (tab: 'feed' | 'discovery' | 'best-dynamos' | 'landing' | 'profile' | 'admin' | 'settings') => {
     setSelectedTag(null);
+    setActiveDynamoId(null);
+    setActiveUsername(null);
     if (tab === 'admin') {
       handleGoToAdmin();
       return;
@@ -128,7 +199,7 @@ function DynamoAppContent() {
       handleGoToSettings();
       return;
     }
-    if (window.location.pathname === '/admin' || window.location.pathname === '/settings' || window.location.hash) {
+    if (window.location.pathname !== '/' || window.location.hash) {
       window.history.pushState(null, '', '/');
     }
     setCurrentTab(tab);
@@ -210,6 +281,7 @@ function DynamoAppContent() {
   useEffect(() => {
     loadFeed(0, false, feedFilter);
     loadTags();
+    setPendingNewDynamos([]);
   }, [user?.id, feedFilter]);
 
   useEffect(() => {
@@ -223,6 +295,58 @@ function DynamoAppContent() {
       };
     }
   }, [user?.id]);
+
+  // Realtime subscription for incoming dynamos in feed
+  useEffect(() => {
+    const unsubscribe = dynamosService.subscribeToNewDynamos(async (newDynamo) => {
+      // 1. Ignore if authored by current user (already prepended when created)
+      if (user && newDynamo.user_id === user.id) return;
+
+      // 2. Ignore if already loaded in dynamos
+      if (dynamos.some((d) => d.id === newDynamo.id)) return;
+
+      // 3. Filter check if user has blocked/muted relationships
+      if (user?.id) {
+        try {
+          const excludedIds = await relationshipsService.getExcludedUserIdsForFeed(user.id);
+          if (excludedIds.includes(newDynamo.user_id)) return;
+
+          if (feedFilter === 'siguiendo') {
+            const following = await relationshipsService.getFollowingIds(user.id);
+            if (!following.includes(newDynamo.user_id)) return;
+          } else if (feedFilter === 'amigos') {
+            const friends = await relationshipsService.getFriendsIds(user.id);
+            if (!friends.includes(newDynamo.user_id)) return;
+          }
+        } catch (e) {
+          console.warn('Error checking relationship for realtime dynamo:', e);
+        }
+      } else {
+        // Unauthenticated visitor in 'siguiendo' or 'amigos' should not see dynamos
+        if (feedFilter === 'siguiendo' || feedFilter === 'amigos') return;
+      }
+
+      setPendingNewDynamos((prev) => {
+        if (prev.some((p) => p.id === newDynamo.id)) return prev;
+        return [newDynamo, ...prev];
+      });
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [user?.id, feedFilter, dynamos]);
+
+  const handleApplyPendingDynamos = () => {
+    if (pendingNewDynamos.length === 0) return;
+    setDynamos((prev) => {
+      const existingIds = new Set(prev.map((d) => d.id));
+      const additions = pendingNewDynamos.filter((d) => !existingIds.has(d.id));
+      return [...additions, ...prev];
+    });
+    setPendingNewDynamos([]);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   // Handle gifting energy without full page reload
   const handleGiftEnergy = async (dynamoId: string) => {
@@ -594,6 +718,60 @@ function DynamoAppContent() {
           </Suspense>
         )}
 
+        {/* Tab: Single Dynamo View (/d/:id) */}
+        {currentTab === 'single-dynamo' && activeDynamoId && (
+          <Suspense fallback={<FeedSkeleton />}>
+            <SingleDynamoView
+              dynamoId={activeDynamoId}
+              onBack={handleGoToHome}
+              onOpenAuth={() => {
+                setAuthModalMode('login');
+                setIsAuthModalOpen(true);
+              }}
+              onGiftEnergy={handleGiftEnergy}
+              onOpenReply={(d) => setActiveReplyDynamo(d)}
+              onReport={(id, authorId) => setReportingTarget({ dynamoId: id, authorId })}
+              onDelete={handleDeleteDynamo}
+              onSelectHashtag={(tag) => {
+                setDiscoveryHashtag(tag);
+                setDiscoveryInitialSection('tendencias');
+                setCurrentTab('discovery');
+              }}
+              onAuthorClick={(author) => {
+                if (author?.username) {
+                  handleOpenPublicProfile(author.username);
+                } else if (author) {
+                  setActiveProfileModal(author);
+                }
+              }}
+            />
+          </Suspense>
+        )}
+
+        {/* Tab: Public Profile (/@username) */}
+        {currentTab === 'public-profile' && activeUsername && (
+          <Suspense fallback={<ProfileSkeleton />}>
+            <PublicProfileView
+              username={activeUsername}
+              onBack={handleGoToHome}
+              onOpenAuth={() => {
+                setAuthModalMode('login');
+                setIsAuthModalOpen(true);
+              }}
+              onGiftEnergy={handleGiftEnergy}
+              onOpenReply={(d) => setActiveReplyDynamo(d)}
+              onReport={(id, authorId) => setReportingTarget({ dynamoId: id, authorId })}
+              onDelete={handleDeleteDynamo}
+              onSelectHashtag={(tag) => {
+                setDiscoveryHashtag(tag);
+                setDiscoveryInitialSection('tendencias');
+                setCurrentTab('discovery');
+              }}
+              onGoToSettings={handleGoToSettings}
+            />
+          </Suspense>
+        )}
+
         {/* Tab: Admin Panel (/admin) */}
         {currentTab === 'admin' && (
           <Suspense fallback={<SettingsSkeleton />}>
@@ -644,7 +822,7 @@ function DynamoAppContent() {
           <Suspense fallback={<BestDynamosSkeleton />}>
             <BestDynamosView
               currentUserId={user?.id}
-              onAuthorClick={(author) => setActiveProfileModal(author)}
+              onAuthorClick={(author) => (author?.username ? handleOpenPublicProfile(author.username) : setActiveProfileModal(author))}
               onRequireAuth={() => {
                 setAuthModalMode('login');
                 setIsAuthModalOpen(true);
@@ -662,7 +840,7 @@ function DynamoAppContent() {
               onOpenReply={(d) => setActiveReplyDynamo(d)}
               onReport={(id, authorId) => setReportingTarget({ dynamoId: id, authorId })}
               onDelete={handleDeleteDynamo}
-              onAuthorClick={(author) => setActiveProfileModal(author)}
+              onAuthorClick={(author) => (author?.username ? handleOpenPublicProfile(author.username) : setActiveProfileModal(author))}
               onRequireAuth={() => {
                 setAuthModalMode('login');
                 setIsAuthModalOpen(true);
@@ -784,6 +962,22 @@ function DynamoAppContent() {
               </div>
             </div>
 
+            {/* Realtime Pending Dynamos Capsule */}
+            {pendingNewDynamos.length > 0 && (
+              <div className="sticky top-16 z-30 flex justify-center py-1">
+                <button
+                  id="btn-realtime-pending-dynamos"
+                  onClick={handleApplyPendingDynamos}
+                  className="flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500 text-black text-xs font-bold shadow-lg shadow-amber-500/20 hover:bg-amber-400 active:scale-95 transition-all animate-bounce"
+                >
+                  <Zap className="w-3.5 h-3.5 fill-black stroke-black" />
+                  <span>
+                    ⚡ {pendingNewDynamos.length} {pendingNewDynamos.length === 1 ? 'nuevo Dynamo' : 'nuevos Dynamos'}
+                  </span>
+                </button>
+              </div>
+            )}
+
             {/* Dynamos Feed Stream with Skeleton Loader */}
             {isLoadingFeed ? (
               <FeedSkeleton />
@@ -824,7 +1018,7 @@ function DynamoAppContent() {
                       setCurrentTab('discovery');
                     }}
                     onExpired={handleDynamoExpired}
-                    onAuthorClick={(author) => setActiveProfileModal(author)}
+                    onAuthorClick={(author) => (author?.username ? handleOpenPublicProfile(author.username) : setActiveProfileModal(author))}
                   />
                 ))}
 

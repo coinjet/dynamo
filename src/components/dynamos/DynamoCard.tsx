@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Dynamo } from '@/src/modules/dynamos/dynamosTypes';
 import { getDynamoTimeStatus, DynamoTimeStatus } from '@/src/modules/dynamos/dynamoRules';
-import { Zap, MessageSquare, Clock, MoreHorizontal, AlertCircle, Trash2, Check, Flame } from 'lucide-react';
+import { Zap, MessageSquare, Clock, MoreHorizontal, AlertCircle, Trash2, Check, Flame, Share2 } from 'lucide-react';
 import { useAuth } from '@/src/modules/auth/AuthContext';
 import { dynamosService } from '@/src/modules/dynamos/dynamosService';
 import { formatUserFriendlyError } from '@/src/utils/errorHandler';
@@ -155,6 +155,41 @@ export const DynamoCard: React.FC<DynamoCardProps> = ({
     }, 1500);
   };
 
+  const handleShare = async () => {
+    const shareUrl = `${window.location.origin}/d/${dynamo.id}`;
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({
+          title: `Dynamo de @${dynamo.author?.username || 'usuario'}`,
+          text: dynamo.content.length > 120 ? `${dynamo.content.slice(0, 117)}...` : dynamo.content,
+          url: shareUrl,
+        });
+        setGiftFeedback({ type: 'info', message: '✓ Enlace compartido' });
+        setTimeout(() => setGiftFeedback(null), 2500);
+        setShowMenu(false);
+        return;
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return;
+      }
+    }
+
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(shareUrl);
+        setCopiedLink(true);
+        setGiftFeedback({ type: 'info', message: '✓ Enlace copiado al portapapeles' });
+        setTimeout(() => {
+          setCopiedLink(false);
+          setGiftFeedback(null);
+          setShowMenu(false);
+        }, 2000);
+      }
+    } catch {
+      setGiftFeedback({ type: 'error', message: 'No se pudo copiar el enlace' });
+      setTimeout(() => setGiftFeedback(null), 2500);
+    }
+  };
+
   // Visual card styles based on state
   const isAlmostGone = timeStatus.visualState === 'almost_gone';
   const isExpired = timeStatus.isExpired;
@@ -235,6 +270,15 @@ export const DynamoCard: React.FC<DynamoCardProps> = ({
 
             {showMenu && (
               <div className="absolute right-0 top-7 z-20 w-44 rounded-xl border border-[#27313C] bg-[#12171D] p-1.5 shadow-xl text-xs text-stone-300">
+                <button
+                  id={`menu-btn-share-${dynamo.id}`}
+                  onClick={handleShare}
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left hover:bg-stone-800/70 text-stone-200 transition"
+                >
+                  <Share2 className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Compartir Dynamo</span>
+                </button>
+
                 <button
                   onClick={handleCopy}
                   className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left hover:bg-stone-800/70 text-stone-200 transition"
@@ -393,6 +437,17 @@ export const DynamoCard: React.FC<DynamoCardProps> = ({
                 ({dynamo.replies_count})
               </span>
             )}
+          </button>
+
+          {/* Compartir Button */}
+          <button
+            id={`btn-share-${dynamo.id}`}
+            onClick={handleShare}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-stone-800 hover:border-stone-700 hover:bg-stone-800/60 text-stone-300 hover:text-white transition cursor-pointer"
+            title="Compartir Dynamo (/d/...)"
+          >
+            <Share2 className="w-3.5 h-3.5 text-stone-400" />
+            <span className="hidden sm:inline">{copiedLink ? 'Copiado' : 'Compartir'}</span>
           </button>
         </div>
 

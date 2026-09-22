@@ -578,5 +578,72 @@ export const dynamosService = {
     const filtered = current.filter((d) => !(d.id === dynamoId && d.user_id === userId));
     saveStoredDynamos(filtered);
     return true;
-  }
+  },
+
+  /**
+   * Subscribes to real-time new Dynamos.
+   * Calls onNewDynamo whenever an active, non-expired dynamo is published.
+   * Returns an unsubscribe function.
+   */
+  subscribeToNewDynamos(onNewDynamo: (dynamo: Dynamo) => void): () => void {
+    if (!isSupabaseConfigured) {
+      return () => {};
+    }
+
+    try {
+      const channelName = `realtime-new-dynamos-${Date.now()}`;
+      const channel = supabase
+        .channel(channelName)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'dynamos',
+          },
+          async (payload) => {
+            const raw = payload.new as any;
+            if (!raw || raw.status !== 'active') return;
+            if (new Date(raw.expires_at).getTime() <= Date.now()) return;
+
+            // Fetch the author profile to produce a complete Dynamo object
+            let author: Profile | undefined;
+            if (raw.user_id) {
+              const { data: profileData } = await supabase
+                .from('profiles')
+                .select('id, username, avatar, bio, status, created_at')
+                .eq('id', raw.user_id)
+                .maybeSingle();
+              if (profileData) {
+                author = profileData as Profile;
+              }
+            }
+
+            const dynamo: Dynamo = {
+              id: raw.id,
+              user_id: raw.user_id,
+              content: raw.content,
+              image_url: raw.image_url,
+              created_at: raw.created_at,
+              expires_at: raw.expires_at,
+              status: raw.status,
+              hashtags: extractHashtags(raw.content).tags,
+              energy_gifts_count: 0,
+              replies_count: 0,
+              author,
+            };
+
+            onNewDynamo(dynamo);
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    } catch (err) {
+      console.warn('Error subscribing to new dynamos:', err);
+      return () => {};
+    }
+  },
 };

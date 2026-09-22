@@ -143,6 +143,7 @@ export const authService = {
         email: params.email.trim(),
         password: params.password,
         options: {
+          emailRedirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
           data: {
             username: cleanUsername,
             bio: cleanBio,

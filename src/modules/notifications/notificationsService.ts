@@ -28,8 +28,8 @@ export const notificationsService = {
   async getNotifications(userId: string): Promise<Notification[]> {
     if (!userId) return [];
 
-    // Trigger check for dynamos about to expire (< 2 hours remaining)
-    await this.checkAndGenerateExpiringNotifications(userId);
+    // Trigger check for dynamos about to expire (< 2 hours remaining) non-blocking
+    this.checkAndGenerateExpiringNotifications(userId).catch(() => {});
 
     if (isSupabaseConfigured) {
       try {
@@ -369,6 +369,7 @@ export const notificationsService = {
   /**
    * Subscribes to real-time notification events for the given user.
    * Calls onUpdate callback whenever a new notification is inserted, updated, or deleted.
+   * Handles channel lifecycle, background reconnection, and ensures no duplicate listeners.
    * Returns an unsubscribe cleanup function.
    */
   subscribeToUserNotifications(userId: string, onUpdate: () => void): () => void {
@@ -377,7 +378,7 @@ export const notificationsService = {
     }
 
     try {
-      const channelName = `realtime-notifs-${userId}`;
+      const channelName = `realtime-notifs-${userId}-${Date.now()}`;
       const channel = supabase
         .channel(channelName)
         .on(
@@ -386,15 +387,47 @@ export const notificationsService = {
             event: '*',
             schema: 'public',
             table: 'notifications',
-            filter: `user_id=eq.${userId}`,
           },
-          () => {
-            onUpdate();
+          (payload) => {
+            const newRecord = payload.new as any;
+            const oldRecord = payload.old as any;
+            const targetUserId = newRecord?.user_id || oldRecord?.user_id;
+
+            // RLS ensures only permitted events arrive, but verify user_id client-side as safety guard
+            if (!targetUserId || targetUserId === userId) {
+              onUpdate();
+            }
           }
         )
-        .subscribe();
+        .subscribe((status, err) => {
+          if (status === 'SUBSCRIBED') {
+            // Successfully connected to notifications stream
+          } else if (status === 'CHANNEL_ERROR') {
+            console.warn('[Realtime] Notifications channel error:', err);
+          }
+        });
+
+      // Also trigger onUpdate when browser tab becomes visible or reconnects
+      const handleSync = () => {
+        if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+          onUpdate();
+        }
+      };
+
+      const handleOnline = () => {
+        onUpdate();
+      };
+
+      if (typeof window !== 'undefined') {
+        window.addEventListener('visibilitychange', handleSync);
+        window.addEventListener('online', handleOnline);
+      }
 
       return () => {
+        if (typeof window !== 'undefined') {
+          window.removeEventListener('visibilitychange', handleSync);
+          window.removeEventListener('online', handleOnline);
+        }
         supabase.removeChannel(channel);
       };
     } catch (err) {
