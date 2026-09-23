@@ -164,28 +164,39 @@ export const authService = {
       }
 
       // Fetch profile created securely by server-side trigger handle_new_user()
-      const { data: fetchedProfile } = await supabase
+      let { data: fetchedProfile, error: profileError } = await supabase
         .from('profiles')
-        .select('*')
+        .select('id, username, avatar, bio, created_at, role, status')
         .eq('id', data.user.id)
         .maybeSingle();
 
-      const profile: UserProfile = fetchedProfile
-        ? (fetchedProfile as UserProfile)
-        : {
-            id: data.user.id,
-            username: cleanUsername,
-            avatar: '',
-            bio: cleanBio,
-            created_at: data.user.created_at || new Date().toISOString(),
-            role: 'user',
-            status: 'active',
-          };
+      // Brief retry in case handle_new_user() trigger execution has a micro-delay
+      if (!fetchedProfile) {
+        await new Promise((r) => setTimeout(r, 400));
+        const retry = await supabase
+          .from('profiles')
+          .select('id, username, avatar, bio, created_at, role, status')
+          .eq('id', data.user.id)
+          .maybeSingle();
+        fetchedProfile = retry.data;
+        profileError = retry.error;
+      }
+
+      if (!fetchedProfile) {
+        if (import.meta.env.DEV) {
+          console.error('[authService.signUp] El trigger server-side handle_new_user() no generó el perfil:', {
+            userId: data.user.id,
+            error: profileError,
+          });
+        }
+        // Strictly eliminate client-side fallback profile construction / fake objects
+        throw new Error('No pudimos cargar tu perfil tras el registro. Por favor, intenta iniciar sesión.');
+      }
 
       const email_confirmed_at = data.user.email_confirmed_at || (data.user as any).confirmed_at || null;
       return {
         user: { id: data.user.id, email: data.user.email, email_confirmed_at },
-        profile,
+        profile: fetchedProfile as UserProfile,
       };
     }
 
@@ -237,17 +248,13 @@ export const authService = {
 
       let profile = await profilesService.getProfile(data.user.id);
       if (!profile) {
-        // Fallback create profile if missing
-        profile = {
-          id: data.user.id,
-          username: email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '') || 'usuario',
-          avatar: '',
-          bio: '',
-          created_at: new Date().toISOString(),
-          role: 'user',
-          status: 'active',
-        };
-        await supabase.from('profiles').upsert(profile);
+        if (import.meta.env.DEV) {
+          console.error('[authService.signIn] Perfil no encontrado en base de datos para el usuario autenticado:', data.user.id);
+        }
+        // Profile must be created server-side by handle_new_user() trigger.
+        // Never invent usernames, derive from email, or upsert from client.
+        await supabase.auth.signOut();
+        throw new Error('No pudimos cargar tu perfil. Inténtalo nuevamente.');
       }
 
       if (profile.status === 'suspended') {
@@ -262,13 +269,10 @@ export const authService = {
       };
     }
 
-    // Local Sandbox sign in
+    // Local Development Sandbox sign in (only when Supabase is not configured)
     const session: AuthSession = {
       user: { id: DEFAULT_DEMO_USER.id, email, email_confirmed_at: new Date().toISOString() },
-      profile: {
-        ...DEFAULT_DEMO_USER,
-        username: email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '') || DEFAULT_DEMO_USER.username,
-      },
+      profile: DEFAULT_DEMO_USER,
     };
     localStorage.setItem(LOCAL_STORAGE_SESSION_KEY, JSON.stringify(session));
     return session;

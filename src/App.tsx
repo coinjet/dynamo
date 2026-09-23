@@ -1,5 +1,7 @@
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { AuthProvider, useAuth } from '@/src/modules/auth/AuthContext';
+import { isSupabaseConfigured } from '@/src/lib/supabase';
+import { MissingConfigView } from '@/src/components/layout/MissingConfigView';
 import { Header } from '@/src/components/layout/Header';
 import { BottomNav } from '@/src/components/layout/BottomNav';
 import { OfflineIndicator } from '@/src/components/layout/OfflineIndicator';
@@ -296,26 +298,40 @@ function DynamoAppContent() {
     }
   }, [user?.id]);
 
-  // Realtime subscription for incoming dynamos in feed
+  // Stable refs to prevent subscription re-creation on every render
+  const userRef = useRef(user);
+  userRef.current = user;
+
+  const feedFilterRef = useRef(feedFilter);
+  feedFilterRef.current = feedFilter;
+
+  const dynamosRef = useRef(dynamos);
+  dynamosRef.current = dynamos;
+
+  // Realtime subscription for incoming dynamos in feed (stable single connection)
   useEffect(() => {
     const unsubscribe = dynamosService.subscribeToNewDynamos(async (newDynamo) => {
+      const currentUser = userRef.current;
+      const currentFilter = feedFilterRef.current;
+      const currentDynamos = dynamosRef.current;
+
       // 1. Ignore if authored by current user (already prepended when created)
-      if (user && newDynamo.user_id === user.id) return;
+      if (currentUser && newDynamo.user_id === currentUser.id) return;
 
       // 2. Ignore if already loaded in dynamos
-      if (dynamos.some((d) => d.id === newDynamo.id)) return;
+      if (currentDynamos.some((d) => d.id === newDynamo.id)) return;
 
       // 3. Filter check if user has blocked/muted relationships
-      if (user?.id) {
+      if (currentUser?.id) {
         try {
-          const excludedIds = await relationshipsService.getExcludedUserIdsForFeed(user.id);
+          const excludedIds = await relationshipsService.getExcludedUserIdsForFeed(currentUser.id);
           if (excludedIds.includes(newDynamo.user_id)) return;
 
-          if (feedFilter === 'siguiendo') {
-            const following = await relationshipsService.getFollowingIds(user.id);
+          if (currentFilter === 'siguiendo') {
+            const following = await relationshipsService.getFollowingIds(currentUser.id);
             if (!following.includes(newDynamo.user_id)) return;
-          } else if (feedFilter === 'amigos') {
-            const friends = await relationshipsService.getFriendsIds(user.id);
+          } else if (currentFilter === 'amigos') {
+            const friends = await relationshipsService.getFriendsIds(currentUser.id);
             if (!friends.includes(newDynamo.user_id)) return;
           }
         } catch (e) {
@@ -323,7 +339,7 @@ function DynamoAppContent() {
         }
       } else {
         // Unauthenticated visitor in 'siguiendo' or 'amigos' should not see dynamos
-        if (feedFilter === 'siguiendo' || feedFilter === 'amigos') return;
+        if (currentFilter === 'siguiendo' || currentFilter === 'amigos') return;
       }
 
       setPendingNewDynamos((prev) => {
@@ -335,17 +351,13 @@ function DynamoAppContent() {
     return () => {
       unsubscribe();
     };
-  }, [user?.id, feedFilter, dynamos]);
+  }, []);
 
-  const handleApplyPendingDynamos = () => {
+  const handleApplyPendingDynamos = async () => {
     if (pendingNewDynamos.length === 0) return;
-    setDynamos((prev) => {
-      const existingIds = new Set(prev.map((d) => d.id));
-      const additions = pendingNewDynamos.filter((d) => !existingIds.has(d.id));
-      return [...additions, ...prev];
-    });
     setPendingNewDynamos([]);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    await loadFeed(0, false, feedFilterRef.current);
   };
 
   // Handle gifting energy without full page reload
@@ -1165,6 +1177,10 @@ function DynamoAppContent() {
 }
 
 export default function App() {
+  if (import.meta.env.PROD && !isSupabaseConfigured) {
+    return <MissingConfigView />;
+  }
+
   return (
     <AuthProvider>
       <DynamoAppContent />

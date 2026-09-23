@@ -12,7 +12,16 @@ export const repliesService = {
     if (isSupabaseConfigured) {
       const { data, error } = await supabase
         .from('replies')
-        .select('*, profiles:user_id (*)')
+        .select(`
+          id,
+          dynamo_id,
+          user_id,
+          content,
+          parent_reply_id,
+          status,
+          created_at,
+          profiles:user_id (id, username, avatar, bio, status, created_at)
+        `)
         .eq('dynamo_id', dynamoId)
         .neq('status', 'hidden')
         .order('created_at', { ascending: true });
@@ -28,6 +37,10 @@ export const repliesService = {
         created_at: r.created_at,
         author: r.profiles,
       }));
+    }
+
+    if (import.meta.env.PROD || isSupabaseConfigured) {
+      return [];
     }
 
     const saved = localStorage.getItem(LOCAL_STORAGE_REPLIES_KEY);
@@ -156,7 +169,11 @@ export const repliesService = {
       };
     }
 
-    // Local fallback
+    if (import.meta.env.PROD || isSupabaseConfigured) {
+      throw new Error('Estamos teniendo problemas de conexión. Inténtalo nuevamente.');
+    }
+
+    // Local fallback (development only)
     const rawDynamos = localStorage.getItem(LOCAL_STORAGE_DYNAMOS_KEY);
     const dynamos = rawDynamos ? JSON.parse(rawDynamos) : [];
     const target = dynamos.find((d: any) => d.id === dto.dynamoId);

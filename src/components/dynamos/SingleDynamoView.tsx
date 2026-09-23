@@ -63,6 +63,9 @@ export const SingleDynamoView: React.FC<SingleDynamoViewProps> = ({
         }
 
         setDynamo(data);
+        const author = data.author?.username ? `@${data.author.username}` : 'Dynamo';
+        const snippet = data.content.length > 40 ? `${data.content.slice(0, 37)}...` : data.content;
+        document.title = `${author}: "${snippet}" • Dynamo`;
       })
       .catch((err) => {
         console.error('Error loading single dynamo:', err);

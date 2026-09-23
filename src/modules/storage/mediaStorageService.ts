@@ -62,46 +62,91 @@ async function checkMagicBytes(file: File): Promise<{ valid: boolean; detectedMi
   }
 }
 
+function generateSecureEntropy(length = 8): string {
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    const bytes = new Uint8Array(length);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('').slice(0, length);
+  }
+  return Math.random().toString(36).substring(2, 2 + length);
+}
+
 /**
- * Sanitizes image and strips EXIF GPS/metadata by re-encoding through an offscreen canvas.
- * This guarantees user location and device info cannot be leaked in image headers.
+ * Sanitizes image and strictly strips EXIF GPS/metadata by re-encoding through a clean canvas.
+ * This guarantees user location, camera info and private metadata cannot be leaked in image headers.
+ * Uses createImageBitmap if available, and falls back to HTMLImageElement + Object URL + Canvas.
+ * If sanitization cannot be guaranteed, the upload is rejected to protect user privacy.
  */
 async function stripExifAndSanitize(file: File, mimeType: string): Promise<Blob> {
-  // If in environment without window/canvas, fallback to raw blob
-  if (typeof window === 'undefined' || !window.createImageBitmap) {
-    return file;
-  }
+  // Method 1: Offscreen / createImageBitmap
+  if (typeof window !== 'undefined' && typeof window.createImageBitmap === 'function') {
+    try {
+      const bitmap = await window.createImageBitmap(file);
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
 
-  try {
-    const bitmap = await createImageBitmap(file);
-    const canvas = document.createElement('canvas');
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      return file;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(bitmap, 0, 0);
+        const blob = await new Promise<Blob | null>((resolve) => {
+          canvas.toBlob(resolve, mimeType, 0.92);
+        });
+        if (blob) return blob;
+      }
+    } catch (bitmapErr) {
+      console.warn('createImageBitmap sanitization failed, trying Image element fallback:', bitmapErr);
     }
-
-    ctx.drawImage(bitmap, 0, 0);
-
-    return await new Promise<Blob>((resolve) => {
-      canvas.toBlob(
-        (blob) => {
-          if (blob) {
-            resolve(blob);
-          } else {
-            resolve(file);
-          }
-        },
-        mimeType,
-        0.92
-      );
-    });
-  } catch (err) {
-    console.warn('Metadata sanitization fallback:', err);
-    return file;
   }
+
+  // Method 2: HTMLImageElement + Object URL + Canvas fallback
+  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    try {
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        const img = new Image();
+        const objectUrl = URL.createObjectURL(file);
+
+        img.onload = () => {
+          URL.revokeObjectURL(objectUrl);
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth || img.width;
+            canvas.height = img.naturalHeight || img.height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              reject(new Error('Contexto 2D no disponible'));
+              return;
+            }
+            ctx.drawImage(img, 0, 0);
+            canvas.toBlob(
+              (b) => {
+                if (b) resolve(b);
+                else reject(new Error('Conversión de canvas a Blob fallida'));
+              },
+              mimeType,
+              0.92
+            );
+          } catch (cErr) {
+            reject(cErr);
+          }
+        };
+
+        img.onerror = () => {
+          URL.revokeObjectURL(objectUrl);
+          reject(new Error('No se pudo decodificar la imagen'));
+        };
+
+        img.src = objectUrl;
+      });
+
+      return blob;
+    } catch (imgErr) {
+      console.warn('Image element sanitization fallback failed:', imgErr);
+    }
+  }
+
+  // Strict privacy enforcement: never upload unsanitized original if metadata stripping cannot be completed
+  throw new Error('No fue posible procesar la imagen para eliminar metadatos privados de forma segura. Por favor, intenta con otra imagen o formato.');
 }
 
 export const mediaStorageService = {
@@ -180,8 +225,8 @@ export const mediaStorageService = {
     // Strip EXIF / GPS metadata
     const sanitizedBlob = await stripExifAndSanitize(file, mime);
 
-    // Random collision-resistant filename (never user-controlled)
-    const randomEntropy = Math.random().toString(36).substring(2, 10);
+    // Random collision-resistant filename using cryptographically secure entropy (never user-controlled)
+    const randomEntropy = generateSecureEntropy(12);
     const safeFilename = `${Date.now()}_${randomEntropy}.${cleanExt}`;
     const storagePath = `${userId}/${safeFilename}`;
 
@@ -210,6 +255,10 @@ export const mediaStorageService = {
         .getPublicUrl(storagePath);
 
       return publicUrlData.publicUrl;
+    }
+
+    if (import.meta.env.PROD || isSupabaseConfigured) {
+      throw new Error('El servicio de subida de imágenes no está disponible.');
     }
 
     // Local development fallback: Convert sanitized blob to data URL for preview
@@ -292,8 +341,8 @@ export const mediaStorageService = {
     // Strip EXIF / GPS metadata
     const sanitizedBlob = await stripExifAndSanitize(file, mime);
 
-    // Random collision-resistant filename
-    const randomEntropy = Math.random().toString(36).substring(2, 10);
+    // Random collision-resistant filename using cryptographically secure entropy
+    const randomEntropy = generateSecureEntropy(12);
     const safeFilename = `${Date.now()}_${randomEntropy}.${cleanExt}`;
     const storagePath = `avatars/${userId}/${safeFilename}`;
 
@@ -319,6 +368,10 @@ export const mediaStorageService = {
       }
 
       return publicUrlData.publicUrl;
+    }
+
+    if (import.meta.env.PROD || isSupabaseConfigured) {
+      throw new Error('El servicio de subida de avatares no está disponible.');
     }
 
     // Local development fallback

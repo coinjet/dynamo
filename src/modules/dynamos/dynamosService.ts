@@ -190,8 +190,16 @@ export const dynamosService = {
           };
         });
       } catch (err) {
-        console.warn('Supabase query failed, falling back to local feed:', err);
+        console.warn('Supabase query failed:', err);
+        if (import.meta.env.PROD || isSupabaseConfigured) {
+          throw new Error('Estamos teniendo problemas de conexión. Inténtalo nuevamente.');
+        }
       }
+    }
+
+    // Local fallback ONLY allowed in development environment without Supabase
+    if (import.meta.env.PROD || isSupabaseConfigured) {
+      return [];
     }
 
     // Local fallback: filter out expired, non-active, and blocked/muted
@@ -346,6 +354,10 @@ export const dynamosService = {
       };
     }
 
+    if (import.meta.env.PROD) {
+      throw new Error('Estamos teniendo problemas de conexión. Inténtalo nuevamente.');
+    }
+
     // Local fallback for development environment:
     // Initial 24 hours duration strictly assigned
     const initialExpiresAt = calculateInitialExpiration(DYNAMO_CONFIG.INITIAL_DURATION_HOURS);
@@ -399,6 +411,10 @@ export const dynamosService = {
         reachedMaxLifespan: Boolean(data.reached_max_lifespan),
         giftsRemainingToday: data.gifts_remaining_today,
       };
+    }
+
+    if (import.meta.env.PROD) {
+      throw new Error('Estamos teniendo problemas de conexión. Inténtalo nuevamente.');
     }
 
     // Local development emulation matching PostgreSQL function logic
@@ -503,17 +519,55 @@ export const dynamosService = {
 
   async getUserDynamos(userId: string): Promise<Dynamo[]> {
     if (isSupabaseConfigured) {
-      const { data } = await supabase
-        .from('dynamos')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
+      try {
+        const nowIso = new Date().toISOString();
+        const { data } = await supabase
+          .from('dynamos')
+          .select(`
+            id,
+            user_id,
+            content,
+            image_url,
+            created_at,
+            expires_at,
+            status,
+            hashtags,
+            author:user_id (id, username, avatar, bio, status, created_at),
+            dynamo_gifts(count),
+            replies(count)
+          `)
+          .eq('user_id', userId)
+          .eq('status', 'active')
+          .gt('expires_at', nowIso)
+          .order('created_at', { ascending: false });
 
-      return data || [];
+        return (data || [])
+          .filter((item: any) => item.author?.status !== 'suspended')
+          .map((item: any) => ({
+            id: item.id,
+            user_id: item.user_id,
+            content: item.content,
+            image_url: item.image_url,
+            created_at: item.created_at,
+            expires_at: item.expires_at,
+            status: item.status,
+            author: item.author,
+            hashtags: item.hashtags || extractHashtags(item.content).tags,
+            energy_gifts_count: item.dynamo_gifts?.[0]?.count || 0,
+            replies_count: item.replies?.[0]?.count || 0,
+          }));
+      } catch {
+        return [];
+      }
+    }
+
+    if (import.meta.env.PROD) {
+      return [];
     }
 
     const current = getStoredDynamos();
-    return current.filter((d) => d.user_id === userId);
+    const now = Date.now();
+    return current.filter((d) => d.user_id === userId && d.status === 'active' && new Date(d.expires_at).getTime() > now);
   },
 
   async getDynamoById(dynamoId: string): Promise<Dynamo | null> {
@@ -521,11 +575,26 @@ export const dynamosService = {
       try {
         const { data, error } = await supabase
           .from('dynamos')
-          .select('*, author:user_id (*)')
+          .select(`
+            id,
+            user_id,
+            content,
+            image_url,
+            created_at,
+            expires_at,
+            status,
+            hashtags,
+            author:user_id (id, username, avatar, bio, status, created_at),
+            dynamo_gifts(count),
+            replies(count)
+          `)
           .eq('id', dynamoId)
           .maybeSingle();
 
         if (error || !data) return null;
+        if (data.status === 'deleted') return null;
+        if ((data as any).author && (data as any).author.status === 'suspended') return null;
+
         return {
           id: data.id,
           user_id: data.user_id,
@@ -534,14 +603,19 @@ export const dynamosService = {
           created_at: data.created_at,
           expires_at: data.expires_at,
           status: data.status,
-          hashtags: data.hashtags || [],
-          energy_gifts_count: data.energy_gifts_count || 0,
-          replies_count: data.replies_count || 0,
+          hashtags: data.hashtags || extractHashtags(data.content).tags,
+          energy_gifts_count: (data as any).dynamo_gifts?.[0]?.count || 0,
+          replies_count: (data as any).replies?.[0]?.count || 0,
           author: (data as any).author,
         };
       } catch (err) {
         console.warn('Error fetching single dynamo by ID:', err);
+        return null;
       }
+    }
+
+    if (import.meta.env.PROD) {
+      return null;
     }
 
     const current = getStoredDynamos();
@@ -572,6 +646,10 @@ export const dynamosService = {
       }
 
       return !error;
+    }
+
+    if (import.meta.env.PROD) {
+      throw new Error('Estamos teniendo problemas de conexión. Inténtalo nuevamente.');
     }
 
     const current = getStoredDynamos();
@@ -615,6 +693,7 @@ export const dynamosService = {
                 .eq('id', raw.user_id)
                 .maybeSingle();
               if (profileData) {
+                if ((profileData as any).status === 'suspended') return;
                 author = profileData as Profile;
               }
             }

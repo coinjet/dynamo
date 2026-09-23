@@ -20,6 +20,11 @@ function saveStoredNotifications(notifs: Notification[]): void {
   localStorage.setItem(LOCAL_STORAGE_NOTIFS_KEY, JSON.stringify(notifs));
 }
 
+// Track active subscription channel to prevent multiple simultaneous channels for the same user
+let activeNotifChannel: any = null;
+let activeNotifUserId: string | null = null;
+let notifDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
 export const notificationsService = {
   /**
    * Get chronological notifications for authenticated user, most recent first.
@@ -106,11 +111,18 @@ export const notificationsService = {
 
         return list;
       } catch (err) {
-        console.warn('Supabase notifications query failed, using local fallback:', err);
+        console.warn('Supabase notifications query failed:', err);
+        if (import.meta.env.PROD || isSupabaseConfigured) {
+          return [];
+        }
       }
     }
 
-    // Local Storage fallback with privacy rules
+    // Local Storage fallback ONLY allowed in development without Supabase
+    if (import.meta.env.PROD || isSupabaseConfigured) {
+      return [];
+    }
+
     const blockedList = await relationshipsService.getExcludedUserIdsForFeed(userId);
     const all = getStoredNotifications();
     const userNotifs = all
@@ -141,8 +153,12 @@ export const notificationsService = {
           .eq('id', notificationId);
         return !error;
       } catch {
-        // Continue to local fallback
+        return false;
       }
+    }
+
+    if (import.meta.env.PROD) {
+      return false;
     }
 
     const all = getStoredNotifications();
@@ -169,8 +185,12 @@ export const notificationsService = {
           .eq('read', false);
         return !error;
       } catch {
-        // Continue to local fallback
+        return false;
       }
+    }
+
+    if (import.meta.env.PROD) {
+      return false;
     }
 
     const all = getStoredNotifications();
@@ -368,8 +388,9 @@ export const notificationsService = {
 
   /**
    * Subscribes to real-time notification events for the given user.
-   * Calls onUpdate callback whenever a new notification is inserted, updated, or deleted.
-   * Handles channel lifecycle, background reconnection, and ensures no duplicate listeners.
+   * Listens strictly to INSERT events on notifications table filtered by user_id.
+   * Handles channel lifecycle (SUBSCRIBED, CHANNEL_ERROR, TIMED_OUT, CLOSED),
+   * background reconnection, debounced coalescing, and prevents orphan or duplicate channels.
    * Returns an unsubscribe cleanup function.
    */
   subscribeToUserNotifications(userId: string, onUpdate: () => void): () => void {
@@ -377,8 +398,30 @@ export const notificationsService = {
       return () => {};
     }
 
+    // Coalescing debounce function to avoid multiple concurrent load notifications
+    const triggerDebouncedUpdate = () => {
+      if (notifDebounceTimer) {
+        clearTimeout(notifDebounceTimer);
+      }
+      notifDebounceTimer = setTimeout(() => {
+        notifDebounceTimer = null;
+        onUpdate();
+      }, 100);
+    };
+
+    // Clean up any existing channel for previous or current user to prevent duplicate listeners
+    if (activeNotifChannel) {
+      try {
+        supabase.removeChannel(activeNotifChannel);
+      } catch {
+        // Safe channel cleanup
+      }
+      activeNotifChannel = null;
+      activeNotifUserId = null;
+    }
+
     try {
-      const channelName = `realtime-notifs-${userId}-${Date.now()}`;
+      const channelName = `notifs-${userId}-${Date.now()}`;
       const channel = supabase
         .channel(channelName)
         .on(
@@ -387,35 +430,43 @@ export const notificationsService = {
             event: '*',
             schema: 'public',
             table: 'notifications',
+            filter: `user_id=eq.${userId}`,
           },
           (payload) => {
             const newRecord = payload.new as any;
-            const oldRecord = payload.old as any;
-            const targetUserId = newRecord?.user_id || oldRecord?.user_id;
-
-            // RLS ensures only permitted events arrive, but verify user_id client-side as safety guard
-            if (!targetUserId || targetUserId === userId) {
-              onUpdate();
+            if (!newRecord || newRecord.user_id === userId) {
+              triggerDebouncedUpdate();
             }
           }
         )
         .subscribe((status, err) => {
           if (status === 'SUBSCRIBED') {
-            // Successfully connected to notifications stream
+            // Connected to notifications stream
           } else if (status === 'CHANNEL_ERROR') {
-            console.warn('[Realtime] Notifications channel error:', err);
+            if (!import.meta.env.PROD) {
+              console.warn('[Realtime] Notifications channel error:', err);
+            }
+          } else if (status === 'TIMED_OUT') {
+            if (!import.meta.env.PROD) {
+              console.warn('[Realtime] Notifications channel timed out');
+            }
+          } else if (status === 'CLOSED') {
+            // Channel closed
           }
         });
 
-      // Also trigger onUpdate when browser tab becomes visible or reconnects
+      activeNotifChannel = channel;
+      activeNotifUserId = userId;
+
+      // Reconnect/re-sync when browser tab becomes visible or reconnects
       const handleSync = () => {
         if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-          onUpdate();
+          triggerDebouncedUpdate();
         }
       };
 
       const handleOnline = () => {
-        onUpdate();
+        triggerDebouncedUpdate();
       };
 
       if (typeof window !== 'undefined') {
@@ -424,14 +475,31 @@ export const notificationsService = {
       }
 
       return () => {
+        if (notifDebounceTimer) {
+          clearTimeout(notifDebounceTimer);
+          notifDebounceTimer = null;
+        }
+
         if (typeof window !== 'undefined') {
           window.removeEventListener('visibilitychange', handleSync);
           window.removeEventListener('online', handleOnline);
         }
-        supabase.removeChannel(channel);
+
+        if (activeNotifChannel === channel) {
+          activeNotifChannel = null;
+          activeNotifUserId = null;
+        }
+
+        try {
+          supabase.removeChannel(channel);
+        } catch {
+          // Safe channel removal
+        }
       };
     } catch (err) {
-      console.warn('Error subscribing to realtime notifications:', err);
+      if (!import.meta.env.PROD) {
+        console.warn('Error subscribing to realtime notifications:', err);
+      }
       return () => {};
     }
   },

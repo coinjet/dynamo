@@ -35,14 +35,22 @@ function saveLocalProfiles(profiles: Record<string, Profile>) {
 export const profilesService = {
   async getProfile(userId: string): Promise<Profile | null> {
     if (isSupabaseConfigured) {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, username, avatar, bio, created_at, role, status')
-        .eq('id', userId)
-        .maybeSingle();
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id, username, avatar, bio, created_at, role, status')
+          .eq('id', userId)
+          .maybeSingle();
 
-      if (error || !data) return null;
-      return data as Profile;
+        if (error || !data) return null;
+        return data as Profile;
+      } catch {
+        return null;
+      }
+    }
+
+    if (import.meta.env.PROD || isSupabaseConfigured) {
+      return null;
     }
 
     const profiles = getLocalProfiles();
@@ -52,14 +60,23 @@ export const profilesService = {
   async getProfileByUsername(username: string): Promise<Profile | null> {
     const cleanUsername = username.trim().toLowerCase();
     if (isSupabaseConfigured) {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, username, avatar, bio, created_at, role, status')
-        .ilike('username', cleanUsername)
-        .maybeSingle();
+      try {
+        // Privacy rule: Public profiles query MUST NOT request role, email, or internal admin data
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id, username, avatar, bio, created_at, status')
+          .ilike('username', cleanUsername)
+          .maybeSingle();
 
-      if (error || !data) return null;
-      return data as Profile;
+        if (error || !data) return null;
+        return data as Profile;
+      } catch {
+        return null;
+      }
+    }
+
+    if (import.meta.env.PROD || isSupabaseConfigured) {
+      return null;
     }
 
     const profiles = getLocalProfiles();
@@ -79,18 +96,26 @@ export const profilesService = {
     }
 
     if (isSupabaseConfigured) {
-      let query = supabase
-        .from('profiles')
-        .select('id', { count: 'exact', head: true })
-        .ilike('username', cleanUsername);
+      try {
+        let query = supabase
+          .from('profiles')
+          .select('id', { count: 'exact', head: true })
+          .ilike('username', cleanUsername);
 
-      if (excludeUserId) {
-        query = query.neq('id', excludeUserId);
+        if (excludeUserId) {
+          query = query.neq('id', excludeUserId);
+        }
+
+        const { count, error } = await query;
+        if (error) return false;
+        return (count ?? 0) === 0;
+      } catch {
+        return false;
       }
+    }
 
-      const { count, error } = await query;
-      if (error) return false;
-      return (count ?? 0) === 0;
+    if (import.meta.env.PROD || isSupabaseConfigured) {
+      return false;
     }
 
     // Local fallback check
@@ -154,7 +179,11 @@ export const profilesService = {
       return data as Profile;
     }
 
-    // Local fallback
+    if (import.meta.env.PROD || isSupabaseConfigured) {
+      throw new Error('Estamos teniendo problemas de conexión. Inténtalo nuevamente.');
+    }
+
+    // Local fallback (development only)
     const profiles = getLocalProfiles();
     const current = profiles[userId] || {
       id: userId,

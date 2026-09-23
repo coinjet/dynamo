@@ -20,6 +20,7 @@ import {
   AlertTriangle,
   Loader2,
   Settings,
+  Share2,
 } from 'lucide-react';
 
 interface ProfileViewProps {
@@ -58,6 +59,42 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [confirmBlock, setConfirmBlock] = useState<boolean>(false);
   const [feedback, setFeedback] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+
+  const [copiedProfile, setCopiedProfile] = useState(false);
+
+  const handleShareProfile = async () => {
+    if (!displayedProfile?.username) return;
+    const profileUrl = `${window.location.origin}/@${displayedProfile.username}`;
+
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({
+          title: `Perfil de @${displayedProfile.username} en Dynamo`,
+          text: displayedProfile.bio || `Perfil de @${displayedProfile.username} en Dynamo`,
+          url: profileUrl,
+        });
+        setFeedback({ type: 'success', message: '✓ Enlace de perfil compartido' });
+        setTimeout(() => setFeedback(null), 2500);
+        return;
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return;
+      }
+    }
+
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(profileUrl);
+        setCopiedProfile(true);
+        setFeedback({ type: 'success', message: '✓ Enlace copiado al portapapeles' });
+        setTimeout(() => {
+          setCopiedProfile(false);
+          setFeedback(null);
+        }, 2000);
+      }
+    } catch (clipboardErr) {
+      console.warn('Clipboard writeText failed:', clipboardErr);
+    }
+  };
 
   // Load relation state when viewing another user's profile
   useEffect(() => {
@@ -318,6 +355,16 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   <span>Editar Perfil</span>
                 </button>
 
+                <button
+                  id="btn-profile-share-own"
+                  onClick={handleShareProfile}
+                  className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl border border-stone-800 bg-[#161D24] text-stone-300 hover:text-white hover:border-stone-700 text-xs font-semibold transition cursor-pointer"
+                  title="Compartir perfil"
+                >
+                  <Share2 className="w-3.5 h-3.5 text-amber-400" />
+                  <span>{copiedProfile ? 'Copiado' : 'Compartir'}</span>
+                </button>
+
                 {onGoToSettings && (
                   <button
                     id="btn-profile-settings"
@@ -402,6 +449,17 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       <span>Silenciar</span>
                     </>
                   )}
+                </button>
+
+                {/* Compartir Perfil */}
+                <button
+                  id="btn-profile-share-other"
+                  onClick={handleShareProfile}
+                  className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-stone-800 bg-[#141A20] text-stone-300 hover:text-white hover:border-stone-700 text-xs font-semibold transition cursor-pointer"
+                  title="Compartir perfil (@...)"
+                >
+                  <Share2 className="w-3.5 h-3.5 text-amber-400" />
+                  <span>{copiedProfile ? 'Copiado' : 'Compartir'}</span>
                 </button>
 
                 {/* Bloquear / Desbloquear */}

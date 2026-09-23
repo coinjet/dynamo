@@ -155,7 +155,7 @@ export function sanitizeAndValidateBio(bio: string): {
   // Strip HTML / script tags
   let cleaned = bio.replace(/[<>]/g, '').trim();
 
-  // Enforce max 140 chars
+  // Enforce max 350 chars (AUTH_LIMITS.BIO_MAX_LENGTH)
   if (cleaned.length > AUTH_LIMITS.BIO_MAX_LENGTH) {
     return {
       sanitized: cleaned.slice(0, AUTH_LIMITS.BIO_MAX_LENGTH),

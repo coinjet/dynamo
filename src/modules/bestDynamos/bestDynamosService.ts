@@ -125,8 +125,19 @@ export const bestDynamosService = {
           period,
         };
       } catch (err) {
-        console.warn('Supabase get_best_dynamos_ranking failed, using local fallback:', err);
+        console.warn('Supabase get_best_dynamos_ranking failed:', err);
       }
+    }
+
+    if (import.meta.env.PROD || isSupabaseConfigured) {
+      return {
+        items: [],
+        total: 0,
+        page: safePage,
+        pageSize: safePageSize,
+        totalPages: 1,
+        period,
+      };
     }
 
     // Local development emulation
@@ -243,8 +254,12 @@ export const bestDynamosService = {
           }));
         }
       } catch (err) {
-        console.warn('Supabase getUserBadges error, falling back to local storage:', err);
+        console.warn('Supabase getUserBadges error:', err);
       }
+    }
+
+    if (import.meta.env.PROD || isSupabaseConfigured) {
+      return [];
     }
 
     // Local storage fallback
@@ -285,8 +300,12 @@ export const bestDynamosService = {
           }));
         }
       } catch (err) {
-        console.warn('Supabase evaluate_and_award_badges error, using local fallback:', err);
+        console.warn('Supabase evaluate_and_award_badges error:', err);
       }
+    }
+
+    if (import.meta.env.PROD || isSupabaseConfigured) {
+      return [];
     }
 
     // Local evaluation

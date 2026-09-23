@@ -48,6 +48,10 @@ export const PublicProfileView: React.FC<PublicProfileViewProps> = ({
     setIsSuspended(false);
 
     const cleanUsername = username.replace(/^@/, '').trim();
+    if (cleanUsername) {
+      document.title = `@${cleanUsername} • Dynamo`;
+    }
+
     if (!cleanUsername) {
       setNotFound(true);
       setIsLoading(false);

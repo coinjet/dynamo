@@ -37,7 +37,7 @@ export const ProfileBadgesSection: React.FC<ProfileBadgesSectionProps> = ({
     };
   }, [userId]);
 
-  const renderBadgeMiniIcon = (iconName?: string) => {
+  const renderBadgeIcon = (iconName?: string) => {
     switch (iconName) {
       case 'Zap':
         return <Zap className="w-3 h-3 text-amber-400" />;
@@ -89,7 +89,7 @@ export const ProfileBadgesSection: React.FC<ProfileBadgesSectionProps> = ({
               className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#161B21] border border-[#232B35] hover:border-amber-500/40 text-xs text-stone-200 transition"
               title={b.badge?.description || b.badge_key}
             >
-              {renderBadgeMiniIcon(b.badge?.iconName)}
+              {renderBadgeIcon(b.badge?.iconName)}
               <span className="font-semibold text-[11px]">{b.badge?.title || b.badge_key}</span>
             </button>
           ))}

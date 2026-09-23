@@ -73,11 +73,18 @@ export const settingsService = {
           return inserted as UserSettings;
         }
       } catch (err) {
-        console.warn('Supabase get user_settings failed, falling back to local storage:', err);
+        console.warn('Supabase get user_settings failed:', err);
       }
     }
 
-    // Local fallback
+    if (import.meta.env.PROD || isSupabaseConfigured) {
+      return {
+        user_id: userId,
+        ...DEFAULT_USER_SETTINGS,
+      };
+    }
+
+    // Local fallback (development only)
     const store = getLocalSettingsStore();
     if (!store[userId]) {
       store[userId] = {
@@ -120,7 +127,11 @@ export const settingsService = {
       return data as UserSettings;
     }
 
-    // Local fallback
+    if (import.meta.env.PROD || isSupabaseConfigured) {
+      throw new Error('Estamos teniendo problemas de conexión al guardar la configuración. Inténtalo nuevamente.');
+    }
+
+    // Local fallback (development only)
     const store = getLocalSettingsStore();
     const current = store[userId] || {
       user_id: userId,
@@ -306,6 +317,10 @@ export const settingsService = {
         success: true,
         message: data?.message || 'Cuenta eliminada y desactivada exitosamente.',
       };
+    }
+
+    if (import.meta.env.PROD || isSupabaseConfigured) {
+      throw new Error('No es posible procesar la solicitud en este momento.');
     }
 
     // Local fallback for sandbox testing

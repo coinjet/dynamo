@@ -54,6 +54,10 @@ export const discoveryService = {
       }
     }
 
+    if (import.meta.env.PROD || isSupabaseConfigured) {
+      return [];
+    }
+
     // Local / Fallback calculation:
     // Strictly evaluate ACTIVE and NON-EXPIRED dynamos
     const now = Date.now();
@@ -193,8 +197,12 @@ export const discoveryService = {
           }));
         }
       } catch (err) {
-        console.warn('Supabase hashtag query failed, falling back to local:', err);
+        console.warn('Supabase hashtag query failed:', err);
       }
+    }
+
+    if (import.meta.env.PROD || isSupabaseConfigured) {
+      return [];
     }
 
     // Local Storage Fallback
@@ -293,8 +301,12 @@ export const discoveryService = {
           }));
         }
       } catch (err) {
-        console.warn('Supabase Casi Desaparecen query failed, falling back to local:', err);
+        console.warn('Supabase Casi Desaparecen query failed:', err);
       }
+    }
+
+    if (import.meta.env.PROD || isSupabaseConfigured) {
+      return [];
     }
 
     // Local Storage Fallback
@@ -405,8 +417,12 @@ export const discoveryService = {
           return withGifts.slice(offset, offset + limit);
         }
       } catch (err) {
-        console.warn('Supabase Reviviendo query failed, falling back to local:', err);
+        console.warn('Supabase Reviviendo query failed:', err);
       }
+    }
+
+    if (import.meta.env.PROD || isSupabaseConfigured) {
+      return [];
     }
 
     // Local Storage Fallback
