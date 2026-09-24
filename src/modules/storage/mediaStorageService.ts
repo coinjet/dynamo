@@ -210,10 +210,6 @@ export const mediaStorageService = {
    * - Never exposes user original filenames or local paths
    */
   async uploadDynamoImage(file: File, userId: string): Promise<string> {
-    if (!userId) {
-      throw new Error('Se requiere un usuario autenticado para subir imágenes.');
-    }
-
     const validation = await this.validateImageFile(file);
     if (!validation.valid) {
       throw new Error(validation.error || 'Archivo de imagen no válido.');
@@ -222,18 +218,47 @@ export const mediaStorageService = {
     const mime = validation.detectedMime || file.type;
     const cleanExt = validation.cleanExtension || 'jpg';
 
+    // Verify authenticated user from Supabase session directly to ensure auth.uid() matches folder name
+    let effectiveUserId = (userId || '').trim().replace(/^\/+|\/+$/g, '');
+
+    if (isSupabaseConfigured) {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData?.user?.id) {
+        throw new Error('[Storage upload] Debes iniciar sesión con una cuenta activa para subir imágenes.');
+      }
+      const authUid = authData.user.id.trim();
+      if (!authUid) {
+        throw new Error('[Storage upload] No se pudo obtener el identificador de usuario de la sesión.');
+      }
+      // Guarantee that the storage folder strictly matches auth.uid()
+      if (effectiveUserId && effectiveUserId !== authUid) {
+        console.warn(`[Storage upload] userId mismatch: passed="${effectiveUserId}", auth.uid="${authUid}". Using auth.uid().`);
+      }
+      effectiveUserId = authUid;
+    }
+
+    if (!effectiveUserId) {
+      throw new Error('[Storage upload] Se requiere un usuario autenticado para subir imágenes.');
+    }
+
     // Strip EXIF / GPS metadata
     const sanitizedBlob = await stripExifAndSanitize(file, mime);
 
     // Random collision-resistant filename using cryptographically secure entropy (never user-controlled)
     const randomEntropy = generateSecureEntropy(12);
     const safeFilename = `${Date.now()}_${randomEntropy}.${cleanExt}`;
-    const storagePath = `${userId}/${safeFilename}`;
+    // Expected storage path: <AUTH_USER_ID>/<safeFilename>.<ext> (never contains dynamo-media/ or avatars/)
+    const storagePath = `${effectiveUserId}/${safeFilename}`;
 
     if (isSupabaseConfigured) {
+      // Pass a File object so multipart/form-data contains the proper filename and MIME type
+      const fileToUpload = typeof File !== 'undefined'
+        ? new File([sanitizedBlob], safeFilename, { type: mime })
+        : sanitizedBlob;
+
       const { error: uploadError } = await supabase.storage
         .from(MEDIA_CONFIG.STORAGE_BUCKET)
-        .upload(storagePath, sanitizedBlob, {
+        .upload(storagePath, fileToUpload, {
           contentType: mime,
           upsert: false,
         });
@@ -247,18 +272,37 @@ export const mediaStorageService = {
         ) {
           throw new Error('Las imágenes están temporalmente desactivadas en la plataforma.');
         }
-        throw new Error(`Error al almacenar imagen: ${uploadError.message}`);
+        throw new Error(`[Storage upload] Error al almacenar imagen: ${uploadError.message}`);
       }
 
       const { data: publicUrlData } = supabase.storage
         .from(MEDIA_CONFIG.STORAGE_BUCKET)
         .getPublicUrl(storagePath);
 
-      return publicUrlData.publicUrl;
+      if (!publicUrlData?.publicUrl) {
+        throw new Error('[public URL] No se pudo obtener la URL pública de la imagen almacenada.');
+      }
+
+      const publicUrl = publicUrlData.publicUrl;
+
+      // Strict validation of the generated public URL
+      if (!publicUrl.startsWith('http://') && !publicUrl.startsWith('https://')) {
+        throw new Error('[public URL] La URL pública generada no es una dirección web válida.');
+      }
+
+      if (publicUrl.startsWith('blob:') || publicUrl.startsWith('data:image')) {
+        throw new Error('[public URL] Formato de URL local no permitido en producción.');
+      }
+
+      if (!mediaStorageService.isValidMediaUrl(publicUrl)) {
+        throw new Error('[public URL] La URL de imagen no corresponde al bucket dynamo-media autorizado.');
+      }
+
+      return publicUrl;
     }
 
     if (import.meta.env.PROD || isSupabaseConfigured) {
-      throw new Error('El servicio de subida de imágenes no está disponible.');
+      throw new Error('[Storage upload] El servicio de subida de imágenes no está disponible.');
     }
 
     // Local development fallback: Convert sanitized blob to data URL for preview

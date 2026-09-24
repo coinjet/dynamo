@@ -19,6 +19,15 @@ export function formatUserFriendlyError(error: unknown): string {
       ? error
       : (error as any)?.message || (error as any)?.error_description || String(error);
 
+  // Directly pass through diagnostic stage errors for clear operational reporting
+  if (
+    rawMessage.startsWith('[Storage upload]') ||
+    rawMessage.startsWith('[public URL]') ||
+    rawMessage.startsWith('[INSERT dynamos]')
+  ) {
+    return rawMessage;
+  }
+
   const lower = rawMessage.toLowerCase();
 
   // Network / Fetch errors

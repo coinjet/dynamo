@@ -315,7 +315,9 @@ export const dynamosService = {
         .select()
         .single();
 
-      if (error) throw new Error(error.message);
+      if (error) {
+        throw new Error(`[INSERT dynamos] Error al crear Dynamo: ${error.message} (código: ${error.code || 'desconocido'})`);
+      }
 
       // Link hashtags safely
       for (const tag of tags) {
