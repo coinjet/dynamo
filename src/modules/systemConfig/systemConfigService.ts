@@ -64,10 +64,10 @@ export const systemConfigService = {
       throw new Error('Operación rechazada: Supabase no está configurado en este entorno.');
     }
 
-    // Call Supabase RPC admin_update_system_setting
+    // Call Supabase RPC admin_update_system_setting with native value so JSONB receives true/false literals, not "\"true\"" strings
     const { error } = await supabase.rpc('admin_update_system_setting', {
       p_key: key,
-      p_value: JSON.stringify(value),
+      p_value: value,
       p_reason: reason.trim(),
     });
 

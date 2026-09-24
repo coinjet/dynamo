@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Dynamo } from '@/src/modules/dynamos/dynamosTypes';
 import { getDynamoTimeStatus, DynamoTimeStatus } from '@/src/modules/dynamos/dynamoRules';
-import { Zap, MessageSquare, Clock, MoreHorizontal, AlertCircle, Trash2, Check, Flame, Share2 } from 'lucide-react';
+import { Zap, MessageSquare, Clock, MoreHorizontal, AlertCircle, Trash2, Check, Flame, Share2, Maximize2 } from 'lucide-react';
 import { useAuth } from '@/src/modules/auth/AuthContext';
 import { dynamosService } from '@/src/modules/dynamos/dynamosService';
 import { formatUserFriendlyError } from '@/src/utils/errorHandler';
+import { ImageLightboxModal } from '@/src/components/common/ImageLightboxModal';
 
 interface DynamoCardProps {
   dynamo: Dynamo;
@@ -41,6 +42,7 @@ export const DynamoCard: React.FC<DynamoCardProps> = ({
   const [giftFeedback, setGiftFeedback] = useState<{ type: 'success' | 'info' | 'error'; message: string } | null>(null);
   const [showMenu, setShowMenu] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const isHidden = dynamo.status === 'hidden';
 
   // Synchronize when prop changes
@@ -339,19 +341,45 @@ export const DynamoCard: React.FC<DynamoCardProps> = ({
 
       {/* Optional Attached Media (Images) */}
       {dynamo.image_url && (
-        <div className="mb-3.5 rounded-xl overflow-hidden border border-[#222B35] bg-[#0D1115] max-h-96 flex items-center justify-center">
-          <img
-            src={dynamo.image_url}
-            alt="Multimedia adjunta al Dynamo"
-            loading="lazy"
-            decoding="async"
-            className="w-full h-auto max-h-96 object-cover object-center transition-transform duration-300 hover:scale-[1.01]"
-            onError={(e) => {
-              // Gracefully hide element if image fails to load
-              (e.currentTarget.parentElement as HTMLElement)?.classList.add('hidden');
+        <>
+          <div
+            onClick={() => setIsImageModalOpen(true)}
+            className="group relative mb-3.5 rounded-xl overflow-hidden border border-[#222B35] bg-[#0D1115] max-h-96 flex items-center justify-center cursor-zoom-in select-none"
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setIsImageModalOpen(true);
+              }
             }}
+            title="Haz clic para ver la imagen completa"
+          >
+            <img
+              src={dynamo.image_url}
+              alt="Multimedia adjunta al Dynamo"
+              loading="lazy"
+              decoding="async"
+              className="w-full h-auto max-h-96 object-cover object-center transition-all duration-300 group-hover:scale-[1.015] group-hover:brightness-105"
+              onError={(e) => {
+                // Gracefully hide element if image fails to load
+                (e.currentTarget.parentElement as HTMLElement)?.classList.add('hidden');
+              }}
+            />
+            {/* Visual affordance badge on hover */}
+            <div className="absolute bottom-2.5 right-2.5 px-2.5 py-1 rounded-md bg-black/75 backdrop-blur-md border border-white/10 text-[11px] text-stone-200 flex items-center gap-1.5 opacity-90 sm:opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none shadow-md">
+              <Maximize2 className="w-3.5 h-3.5 text-amber-400" />
+              <span>Ver completa</span>
+            </div>
+          </div>
+
+          <ImageLightboxModal
+            isOpen={isImageModalOpen}
+            imageUrl={dynamo.image_url}
+            altText={`Imagen de ${dynamo.author_username || 'Dynamo'}`}
+            onClose={() => setIsImageModalOpen(false)}
           />
-        </div>
+        </>
       )}
 
       {/* Hashtags Strip */}

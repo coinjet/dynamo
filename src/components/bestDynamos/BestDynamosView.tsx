@@ -22,7 +22,9 @@ import {
   Sparkles,
   ShieldCheck,
   CheckCircle2,
+  Maximize2,
 } from 'lucide-react';
+import { ImageLightboxModal } from '../common/ImageLightboxModal';
 
 interface BestDynamosViewProps {
   onAuthorClick?: (author: Profile) => void;
@@ -46,6 +48,7 @@ export const BestDynamosView: React.FC<BestDynamosViewProps> = ({
   // Badges Modal
   const [isBadgesModalOpen, setIsBadgesModalOpen] = useState<boolean>(false);
   const [myBadges, setMyBadges] = useState<UserBadge[]>([]);
+  const [lightboxImage, setLightboxImage] = useState<{ url: string; title: string } | null>(null);
 
   const loadRanking = async (pageToLoad: number, activePeriod: RankingPeriod = period) => {
     setIsLoading(true);
@@ -352,16 +355,40 @@ export const BestDynamosView: React.FC<BestDynamosViewProps> = ({
 
                     {/* Optional Attached Media */}
                     {item.image_url && (
-                      <div className="rounded-xl overflow-hidden border border-[#222B35] bg-[#0D1115] max-h-72 flex items-center justify-center">
+                      <div
+                        onClick={() =>
+                          setLightboxImage({
+                            url: item.image_url!,
+                            title: `Dynamo de ${item.author_username}`,
+                          })
+                        }
+                        className="group relative rounded-xl overflow-hidden border border-[#222B35] bg-[#0D1115] max-h-72 flex items-center justify-center cursor-zoom-in select-none"
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setLightboxImage({
+                              url: item.image_url!,
+                              title: `Dynamo de ${item.author_username}`,
+                            });
+                          }
+                        }}
+                        title="Haz clic para ver la imagen completa"
+                      >
                         <img
                           src={item.image_url}
                           alt="Multimedia del Dynamo destacado"
                           loading="lazy"
-                          className="w-full h-auto max-h-72 object-cover object-center"
+                          className="w-full h-auto max-h-72 object-cover object-center transition-all duration-300 group-hover:scale-[1.015] group-hover:brightness-105"
                           onError={(e) => {
                             (e.currentTarget.parentElement as HTMLElement)?.classList.add('hidden');
                           }}
                         />
+                        <div className="absolute bottom-2.5 right-2.5 px-2.5 py-1 rounded-md bg-black/75 backdrop-blur-md border border-white/10 text-[11px] text-stone-200 flex items-center gap-1.5 opacity-90 sm:opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none shadow-md">
+                          <Maximize2 className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Ver completa</span>
+                        </div>
                       </div>
                     )}
 
@@ -435,6 +462,14 @@ export const BestDynamosView: React.FC<BestDynamosViewProps> = ({
         isOpen={isBadgesModalOpen}
         onClose={() => setIsBadgesModalOpen(false)}
         userBadges={myBadges}
+      />
+
+      {/* Image Lightbox Modal */}
+      <ImageLightboxModal
+        isOpen={Boolean(lightboxImage)}
+        imageUrl={lightboxImage?.url || null}
+        altText={lightboxImage?.title || 'Imagen de Dynamo destacado'}
+        onClose={() => setLightboxImage(null)}
       />
     </div>
   );
