@@ -3,7 +3,7 @@ import { supabase, isSupabaseConfigured } from '@/src/lib/supabase';
 export const MEDIA_CONFIG = {
   MAX_FILE_SIZE_BYTES: 5 * 1024 * 1024, // 5 MB
   MAX_FILE_SIZE_MB: 5,
-  ALLOWED_MIME_TYPES: ['image/jpeg', 'image/png', 'image/webp'],
+  ALLOWED_MIME_TYPES: ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'],
   ALLOWED_EXTENSIONS: ['jpg', 'jpeg', 'png', 'webp'],
   STORAGE_BUCKET: 'dynamo-media',
 };
@@ -13,6 +13,11 @@ export interface FileValidationResult {
   error?: string;
   detectedMime?: string;
   cleanExtension?: string;
+}
+
+export interface UploadDynamoMediaResult {
+  publicUrl: string;
+  storagePath: string;
 }
 
 /**
@@ -146,12 +151,14 @@ async function stripExifAndSanitize(file: File, mimeType: string): Promise<Blob>
   }
 
   // Strict privacy enforcement: never upload unsanitized original if metadata stripping cannot be completed
-  throw new Error('No fue posible procesar la imagen para eliminar metadatos privados de forma segura. Por favor, intenta con otra imagen o formato.');
+  const sanitizeFailure = new Error('No fue posible procesar la imagen para eliminar metadatos privados de forma segura. Por favor, intenta con otra imagen o formato.');
+  (sanitizeFailure as any).stage = '[2-SANITIZE]';
+  throw sanitizeFailure;
 }
 
 export const mediaStorageService = {
   /**
-   * Validate image file against format, size, MIME type and header signature.
+   * [1-FILE] Validate image file against format, size, MIME type and header signature.
    */
   async validateImageFile(file: File): Promise<FileValidationResult> {
     if (!file) {
@@ -160,40 +167,60 @@ export const mediaStorageService = {
 
     // 1. File size limit
     if (file.size > MEDIA_CONFIG.MAX_FILE_SIZE_BYTES) {
-      return {
-        valid: false,
-        error: `El archivo excede el tamaño máximo permitido de ${MEDIA_CONFIG.MAX_FILE_SIZE_MB} MB (${(
-          file.size /
-          (1024 * 1024)
-        ).toFixed(1)} MB).`,
-      };
+      const err = `El archivo excede el tamaño máximo permitido de ${MEDIA_CONFIG.MAX_FILE_SIZE_MB} MB (${(
+        file.size /
+        (1024 * 1024)
+      ).toFixed(1)} MB).`;
+      console.error('[1-FILE]', {
+        message: err,
+        code: 'FILE_SIZE_LIMIT_EXCEEDED',
+        details: { size: file.size, maxBytes: MEDIA_CONFIG.MAX_FILE_SIZE_BYTES },
+        hint: 'Sube un archivo de menor tamaño.',
+        statusCode: 400,
+      });
+      return { valid: false, error: err };
     }
 
     // 2. Extension check
     const parts = file.name.split('.');
     const ext = parts.length > 1 ? parts.pop()?.toLowerCase() : '';
     if (!ext || !MEDIA_CONFIG.ALLOWED_EXTENSIONS.includes(ext)) {
-      return {
-        valid: false,
-        error: 'Formato de imagen no permitido. Solo se aceptan archivos JPG, JPEG, PNG o WEBP.',
-      };
+      const err = 'Formato de imagen no permitido. Solo se aceptan archivos JPG, JPEG, PNG o WEBP.';
+      console.error('[1-FILE]', {
+        message: err,
+        code: 'INVALID_FILE_EXTENSION',
+        details: { filename: file.name, extension: ext },
+        hint: 'Utiliza una imagen con extensión .jpg, .jpeg, .png o .webp.',
+        statusCode: 400,
+      });
+      return { valid: false, error: err };
     }
 
     // 3. MIME type check
     if (!MEDIA_CONFIG.ALLOWED_MIME_TYPES.includes(file.type)) {
-      return {
-        valid: false,
-        error: 'El tipo MIME del archivo no es compatible. Se requieren imágenes JPG, PNG o WEBP.',
-      };
+      const err = 'El tipo MIME del archivo no es compatible. Se requieren imágenes JPG, PNG o WEBP.';
+      console.error('[1-FILE]', {
+        message: err,
+        code: 'INVALID_MIME_TYPE',
+        details: { type: file.type, allowed: MEDIA_CONFIG.ALLOWED_MIME_TYPES },
+        hint: 'Asegúrate de que el archivo sea una imagen real.',
+        statusCode: 400,
+      });
+      return { valid: false, error: err };
     }
 
     // 4. Magic bytes verification (detect disguised SVGs, scripts or binaries)
     const magicCheck = await checkMagicBytes(file);
     if (!magicCheck.valid) {
-      return {
-        valid: false,
-        error: 'El archivo no contiene una firma de imagen válida o está corrupto.',
-      };
+      const err = 'El archivo no contiene una firma de imagen válida o está corrupto.';
+      console.error('[1-FILE]', {
+        message: err,
+        code: 'MAGIC_BYTES_MISMATCH',
+        details: { filename: file.name, declaredType: file.type },
+        hint: 'El contenido del archivo no corresponde a los bytes de cabecera esperados.',
+        statusCode: 400,
+      });
+      return { valid: false, error: err };
     }
 
     return {
@@ -205,51 +232,94 @@ export const mediaStorageService = {
 
   /**
    * Upload an image to Supabase Storage:
-   * - Sanitizes metadata (EXIF/GPS)
-   * - Generates server-safe collision-free path: <userId>/<timestamp>_<random>.<ext>
+   * [1-FILE] -> [2-SANITIZE] -> [3-STORAGE-UPLOAD] -> [4-PUBLIC-URL]
+   * - Strict path: <AUTH_USER_ID>/<safeFilename>.<ext>
    * - Never exposes user original filenames or local paths
+   * - Returns { publicUrl, storagePath } for tracking and orphan cleanup
    */
-  async uploadDynamoImage(file: File, userId: string): Promise<string> {
+  async uploadDynamoImage(file: File, userId?: string): Promise<UploadDynamoMediaResult> {
+    // Stage [1-FILE]
     const validation = await this.validateImageFile(file);
     if (!validation.valid) {
-      throw new Error(validation.error || 'Archivo de imagen no válido.');
+      const fileErr = new Error(validation.error || 'Archivo de imagen no válido.');
+      (fileErr as any).stage = '[1-FILE]';
+      throw fileErr;
     }
 
     const mime = validation.detectedMime || file.type;
     const cleanExt = validation.cleanExtension || 'jpg';
 
-    // Verify authenticated user from Supabase session directly to ensure auth.uid() matches folder name
+    // Stage [2-SANITIZE]: Strip EXIF / GPS metadata
+    let sanitizedBlob: Blob;
+    try {
+      sanitizedBlob = await stripExifAndSanitize(file, mime);
+    } catch (sanitizeError: unknown) {
+      const errMsg = (sanitizeError as any)?.message || 'Fallo durante la eliminación de metadatos';
+      console.error('[2-SANITIZE]', {
+        message: errMsg,
+        code: 'METADATA_STRIP_FAILED',
+        details: sanitizeError,
+        hint: 'Intenta convertir la imagen a formato PNG o JPG estándar antes de subirla.',
+        statusCode: 422,
+      });
+      const customSanitizeErr = new Error('No se pudo procesar la imagen de forma segura. Intenta con otra imagen.');
+      (customSanitizeErr as any).stage = '[2-SANITIZE]';
+      throw customSanitizeErr;
+    }
+
+    // Path construction & Auth verification
     let effectiveUserId = (userId || '').trim().replace(/^\/+|\/+$/g, '');
 
     if (isSupabaseConfigured) {
       const { data: authData, error: authError } = await supabase.auth.getUser();
       if (authError || !authData?.user?.id) {
-        throw new Error('[Storage upload] Debes iniciar sesión con una cuenta activa para subir imágenes.');
+        console.error('[3-STORAGE-UPLOAD]', {
+          message: authError?.message || 'Usuario no autenticado en Supabase Auth',
+          code: authError?.status?.toString() || 'AUTH_SESSION_REQUIRED',
+          details: authError,
+          hint: 'Debes tener una sesión activa para subir imágenes.',
+          statusCode: 401,
+        });
+        const unauthErr = new Error('Debes iniciar sesión con una cuenta activa para subir imágenes.');
+        (unauthErr as any).stage = '[3-STORAGE-UPLOAD]';
+        throw unauthErr;
       }
-      const authUid = authData.user.id.trim();
-      if (!authUid) {
-        throw new Error('[Storage upload] No se pudo obtener el identificador de usuario de la sesión.');
-      }
-      // Guarantee that the storage folder strictly matches auth.uid()
-      if (effectiveUserId && effectiveUserId !== authUid) {
-        console.warn(`[Storage upload] userId mismatch: passed="${effectiveUserId}", auth.uid="${authUid}". Using auth.uid().`);
-      }
-      effectiveUserId = authUid;
+      effectiveUserId = authData.user.id.trim();
     }
 
     if (!effectiveUserId) {
-      throw new Error('[Storage upload] Se requiere un usuario autenticado para subir imágenes.');
+      const unauthErr = new Error('Se requiere un usuario autenticado para subir imágenes.');
+      (unauthErr as any).stage = '[3-STORAGE-UPLOAD]';
+      throw unauthErr;
     }
-
-    // Strip EXIF / GPS metadata
-    const sanitizedBlob = await stripExifAndSanitize(file, mime);
 
     // Random collision-resistant filename using cryptographically secure entropy (never user-controlled)
     const randomEntropy = generateSecureEntropy(12);
     const safeFilename = `${Date.now()}_${randomEntropy}.${cleanExt}`;
-    // Expected storage path: <AUTH_USER_ID>/<safeFilename>.<ext> (never contains dynamo-media/ or avatars/)
-    const storagePath = `${effectiveUserId}/${safeFilename}`;
 
+    // STRICT DYNAMO STORAGE PATH: <AUTH_USER_ID>/<safeFilename>.<ext>
+    // Must NOT contain 'dynamo-media/', 'avatars/', full URL, query strings, or spaces
+    const storagePath = `${effectiveUserId}/${safeFilename}`;
+    if (
+      storagePath.includes('dynamo-media') ||
+      storagePath.includes('avatars') ||
+      storagePath.includes('?') ||
+      storagePath.includes('&') ||
+      /\s/.test(storagePath)
+    ) {
+      const pathErr = new Error(`Ruta de almacenamiento inválida: "${storagePath}"`);
+      (pathErr as any).stage = '[3-STORAGE-UPLOAD]';
+      console.error('[3-STORAGE-UPLOAD]', {
+        message: pathErr.message,
+        code: 'INVALID_STORAGE_PATH',
+        details: { storagePath },
+        hint: 'La ruta debe contener únicamente el ID del usuario y el nombre seguro del archivo.',
+        statusCode: 400,
+      });
+      throw pathErr;
+    }
+
+    // Stage [3-STORAGE-UPLOAD] & Stage [4-PUBLIC-URL]
     if (isSupabaseConfigured) {
       // Pass a File object so multipart/form-data contains the proper filename and MIME type
       const fileToUpload = typeof File !== 'undefined'
@@ -264,54 +334,157 @@ export const mediaStorageService = {
         });
 
       if (uploadError) {
-        // If storage RLS policy rejects due to allow_images = false
+        const rawMsg = uploadError.message || 'Error desconocido de almacenamiento';
+        const errCode = (uploadError as any).code || (uploadError as any).error || 'STORAGE_ERROR';
+        const errDetails = (uploadError as any).details || (uploadError as any).data || null;
+        const errHint = (uploadError as any).hint || null;
+        const statusCode = (uploadError as any).statusCode || (uploadError as any).status || 500;
+
+        // Log technical diagnostic details to console ONLY (without leaking tokens or secrets)
+        console.error('[3-STORAGE-UPLOAD]', {
+          message: rawMsg,
+          code: errCode,
+          details: errDetails,
+          hint: errHint,
+          statusCode: statusCode,
+        });
+
+        // Determine user-friendly message
+        let userMessage = 'No se pudo almacenar la imagen. Intenta nuevamente.';
         if (
-          uploadError.message?.toLowerCase().includes('policy') ||
-          uploadError.message?.toLowerCase().includes('violates') ||
-          uploadError.message?.toLowerCase().includes('not allowed')
+          rawMsg.toLowerCase().includes('policy') ||
+          rawMsg.toLowerCase().includes('violates') ||
+          rawMsg.toLowerCase().includes('not allowed')
         ) {
-          throw new Error('Las imágenes están temporalmente desactivadas en la plataforma.');
+          userMessage = 'Las imágenes están temporalmente desactivadas en la plataforma.';
         }
-        throw new Error(`[Storage upload] Error al almacenar imagen: ${uploadError.message}`);
+
+        const uploadErr = new Error(userMessage);
+        (uploadErr as any).stage = '[3-STORAGE-UPLOAD]';
+        (uploadErr as any).technical = {
+          message: rawMsg,
+          code: errCode,
+          details: errDetails,
+          hint: errHint,
+          statusCode: statusCode,
+        };
+        throw uploadErr;
       }
 
+      // Stage [4-PUBLIC-URL]
       const { data: publicUrlData } = supabase.storage
         .from(MEDIA_CONFIG.STORAGE_BUCKET)
         .getPublicUrl(storagePath);
 
       if (!publicUrlData?.publicUrl) {
-        throw new Error('[public URL] No se pudo obtener la URL pública de la imagen almacenada.');
+        console.error('[4-PUBLIC-URL]', {
+          message: 'No se generó la URL pública del objeto almacenado',
+          code: 'PUBLIC_URL_GENERATION_FAILED',
+          details: { storagePath },
+          hint: 'Verifica los permisos de lectura pública del bucket dynamo-media.',
+          statusCode: 500,
+        });
+        const urlErr = new Error('No se pudo generar el enlace público de la imagen.');
+        (urlErr as any).stage = '[4-PUBLIC-URL]';
+        throw urlErr;
       }
 
       const publicUrl = publicUrlData.publicUrl;
 
       // Strict validation of the generated public URL
       if (!publicUrl.startsWith('http://') && !publicUrl.startsWith('https://')) {
-        throw new Error('[public URL] La URL pública generada no es una dirección web válida.');
+        console.error('[4-PUBLIC-URL]', {
+          message: 'URL pública no válida (protocolo inválido)',
+          code: 'INVALID_URL_PROTOCOL',
+          details: { publicUrl },
+          hint: 'La URL pública debe comenzar con http:// o https://.',
+          statusCode: 500,
+        });
+        const urlErr = new Error('La dirección de imagen generada no es válida.');
+        (urlErr as any).stage = '[4-PUBLIC-URL]';
+        throw urlErr;
       }
 
       if (publicUrl.startsWith('blob:') || publicUrl.startsWith('data:image')) {
-        throw new Error('[public URL] Formato de URL local no permitido en producción.');
+        console.error('[4-PUBLIC-URL]', {
+          message: 'URL pública generada es local o data URI',
+          code: 'LOCAL_URI_DISALLOWED',
+          details: { publicUrl: publicUrl.slice(0, 50) },
+          hint: 'En producción se requiere una URL remota de Supabase Storage.',
+          statusCode: 500,
+        });
+        const urlErr = new Error('Formato de dirección local no permitido en producción.');
+        (urlErr as any).stage = '[4-PUBLIC-URL]';
+        throw urlErr;
       }
 
       if (!mediaStorageService.isValidMediaUrl(publicUrl)) {
-        throw new Error('[public URL] La URL de imagen no corresponde al bucket dynamo-media autorizado.');
+        console.error('[4-PUBLIC-URL]', {
+          message: 'La URL no corresponde al bucket dynamo-media autorizado',
+          code: 'BUCKET_MISMATCH',
+          details: { publicUrl, expectedBucket: MEDIA_CONFIG.STORAGE_BUCKET },
+          hint: 'Comprueba la configuración del bucket en Supabase.',
+          statusCode: 500,
+        });
+        const urlErr = new Error('La URL de imagen no corresponde al bucket dynamo-media autorizado.');
+        (urlErr as any).stage = '[4-PUBLIC-URL]';
+        throw urlErr;
       }
 
-      return publicUrl;
+      return { publicUrl, storagePath };
     }
 
     if (import.meta.env.PROD || isSupabaseConfigured) {
-      throw new Error('[Storage upload] El servicio de subida de imágenes no está disponible.');
+      console.error('[3-STORAGE-UPLOAD]', {
+        message: 'Servicio de subida de imágenes no configurado en entorno de producción',
+        code: 'STORAGE_UNAVAILABLE',
+        details: null,
+        hint: 'Verifica las variables VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY.',
+        statusCode: 503,
+      });
+      const unavailErr = new Error('El servicio de subida de imágenes no está disponible.');
+      (unavailErr as any).stage = '[3-STORAGE-UPLOAD]';
+      throw unavailErr;
     }
 
     // Local development fallback: Convert sanitized blob to data URL for preview
-    return new Promise((resolve, reject) => {
+    const localDataUrl = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onloadend = () => resolve(reader.result as string);
       reader.onerror = () => reject(new Error('Error al procesar la imagen localmente'));
       reader.readAsDataURL(sanitizedBlob);
     });
+
+    return {
+      publicUrl: localDataUrl,
+      storagePath: `${effectiveUserId}/${safeFilename}`,
+    };
+  },
+
+  /**
+   * Immediately removes an object from Supabase Storage by exact path.
+   * Used for rollback / cleanup if Dynamo INSERT fails after upload.
+   */
+  async deleteMediaByPath(storagePath: string): Promise<boolean> {
+    if (!storagePath || !isSupabaseConfigured) {
+      return false;
+    }
+
+    try {
+      const cleanPath = storagePath.trim().replace(/^\/+|\/+$/g, '');
+      const { error } = await supabase.storage
+        .from(MEDIA_CONFIG.STORAGE_BUCKET)
+        .remove([cleanPath]);
+
+      if (error) {
+        console.warn('[STORAGE-CLEANUP] Error eliminando objeto huérfano de Storage:', error.message);
+        return false;
+      }
+      return true;
+    } catch (cleanupErr) {
+      console.warn('[STORAGE-CLEANUP] Excepción eliminando objeto huérfano:', cleanupErr);
+      return false;
+    }
   },
 
   /**

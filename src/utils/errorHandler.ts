@@ -19,13 +19,33 @@ export function formatUserFriendlyError(error: unknown): string {
       ? error
       : (error as any)?.message || (error as any)?.error_description || String(error);
 
-  // Directly pass through diagnostic stage errors for clear operational reporting
+  // Stage tags or technical database error codes must never leak to user UI:
+  // Console preserves technical diagnostics, while UI receives clean, friendly Spanish.
+  if (rawMessage.startsWith('[1-FILE]')) {
+    return 'Archivo de imagen no válido. Debe ser JPG, PNG o WEBP de hasta 5 MB.';
+  }
+  if (rawMessage.startsWith('[2-SANITIZE]')) {
+    return 'No se pudo procesar la imagen seleccionada. Intenta con otra imagen.';
+  }
+  if (rawMessage.startsWith('[3-STORAGE-UPLOAD]') || rawMessage.startsWith('[Storage upload]')) {
+    if (rawMessage.toLowerCase().includes('desactivadas') || rawMessage.toLowerCase().includes('policy')) {
+      return 'Las imágenes están temporalmente desactivadas en la plataforma.';
+    }
+    return 'No se pudo almacenar la imagen. Intenta nuevamente.';
+  }
+  if (rawMessage.startsWith('[4-PUBLIC-URL]') || rawMessage.startsWith('[public URL]')) {
+    return 'No se pudo generar el enlace público de la imagen. Intenta nuevamente.';
+  }
+  if (rawMessage.startsWith('[5-DYNAMO-INSERT]') || rawMessage.startsWith('[INSERT dynamos]')) {
+    return 'No se pudo publicar el Dynamo. Intenta nuevamente.';
+  }
+
+  // Database error codes / 22023
   if (
-    rawMessage.startsWith('[Storage upload]') ||
-    rawMessage.startsWith('[public URL]') ||
-    rawMessage.startsWith('[INSERT dynamos]')
+    rawMessage.includes('22023') ||
+    rawMessage.toLowerCase().includes('database error')
   ) {
-    return rawMessage;
+    return 'No se pudo almacenar la imagen. Intenta nuevamente.';
   }
 
   const lower = rawMessage.toLowerCase();

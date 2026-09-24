@@ -316,7 +316,24 @@ export const dynamosService = {
         .single();
 
       if (error) {
-        throw new Error(`[INSERT dynamos] Error al crear Dynamo: ${error.message} (código: ${error.code || 'desconocido'})`);
+        console.error('[5-DYNAMO-INSERT]', {
+          message: error.message,
+          code: error.code || 'UNKNOWN',
+          details: error.details || null,
+          hint: error.hint || null,
+          statusCode: (error as any).status || 500,
+        });
+
+        const insertErr = new Error('No se pudo publicar el Dynamo. Intenta nuevamente.');
+        (insertErr as any).stage = '[5-DYNAMO-INSERT]';
+        (insertErr as any).technical = {
+          message: error.message,
+          code: error.code || 'UNKNOWN',
+          details: error.details || null,
+          hint: error.hint || null,
+          statusCode: (error as any).status || 500,
+        };
+        throw insertErr;
       }
 
       // Link hashtags safely

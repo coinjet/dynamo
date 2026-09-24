@@ -193,7 +193,7 @@ export const CreateDynamoModal: React.FC<CreateDynamoModalProps> = ({
     const sanitized = trimmed.replace(/[<>]/g, '');
 
     setIsSubmitting(true);
-    let uploadedImageUrl: string | null = null;
+    let uploadedMedia: { publicUrl: string; storagePath: string } | null = null;
 
     try {
       // If an image is selected, upload it first securely
@@ -207,11 +207,11 @@ export const CreateDynamoModal: React.FC<CreateDynamoModalProps> = ({
         }
 
         setIsUploadingMedia(true);
-        uploadedImageUrl = await mediaStorageService.uploadDynamoImage(selectedFile, user.id);
+        uploadedMedia = await mediaStorageService.uploadDynamoImage(selectedFile, user.id);
         setIsUploadingMedia(false);
       }
 
-      await onSubmit(sanitized, uploadedImageUrl);
+      await onSubmit(sanitized, uploadedMedia?.publicUrl || null);
       
       // Cleanup after successful submit
       if (previewUrl && previewUrl.startsWith('blob:')) {
@@ -224,6 +224,15 @@ export const CreateDynamoModal: React.FC<CreateDynamoModalProps> = ({
       onClose();
     } catch (err: unknown) {
       setIsUploadingMedia(false);
+
+      // If Dynamo INSERT fails after upload, immediately remove orphaned storage object to keep Storage clean
+      if (uploadedMedia?.storagePath) {
+        console.warn('[STORAGE-CLEANUP] Eliminando objeto huérfano de Storage:', uploadedMedia.storagePath);
+        mediaStorageService.deleteMediaByPath(uploadedMedia.storagePath).catch((cleanupErr) => {
+          console.warn('[STORAGE-CLEANUP] No se pudo limpiar archivo huérfano:', cleanupErr);
+        });
+      }
+
       setErrorMessage(formatUserFriendlyError(err));
     } finally {
       setIsSubmitting(false);
