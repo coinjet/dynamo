@@ -353,7 +353,7 @@ export const BestDynamosView: React.FC<BestDynamosViewProps> = ({
                       {item.content}
                     </p>
 
-                    {/* Optional Attached Media */}
+                    {/* Optional Attached Media - Twitter-style preview */}
                     {item.image_url && (
                       <div
                         onClick={() =>
@@ -362,7 +362,7 @@ export const BestDynamosView: React.FC<BestDynamosViewProps> = ({
                             title: `Dynamo de ${item.author_username}`,
                           })
                         }
-                        className="group relative rounded-xl overflow-hidden border border-[#222B35] bg-[#0D1115] max-h-72 flex items-center justify-center cursor-zoom-in select-none"
+                        className="group relative w-full h-48 sm:h-56 rounded-xl overflow-hidden border border-[#222B35] bg-[#0D1115] flex items-center justify-center cursor-zoom-in select-none"
                         role="button"
                         tabIndex={0}
                         onKeyDown={(e) => {
@@ -374,13 +374,13 @@ export const BestDynamosView: React.FC<BestDynamosViewProps> = ({
                             });
                           }
                         }}
-                        title="Haz clic para ver la imagen completa"
+                        title="Haz clic para expandir imagen completa (estilo Twitter)"
                       >
                         <img
                           src={item.image_url}
                           alt="Multimedia del Dynamo destacado"
                           loading="lazy"
-                          className="w-full h-auto max-h-72 object-cover object-center transition-all duration-300 group-hover:scale-[1.015] group-hover:brightness-105"
+                          className="w-full h-full object-cover object-center transition-all duration-300 group-hover:scale-[1.02] group-hover:brightness-105"
                           onError={(e) => {
                             (e.currentTarget.parentElement as HTMLElement)?.classList.add('hidden');
                           }}

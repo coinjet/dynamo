@@ -339,12 +339,12 @@ export const DynamoCard: React.FC<DynamoCardProps> = ({
         {dynamo.content}
       </p>
 
-      {/* Optional Attached Media (Images) */}
+      {/* Optional Attached Media (Images) - Twitter-style compact preview */}
       {dynamo.image_url && (
         <>
           <div
             onClick={() => setIsImageModalOpen(true)}
-            className="group relative mb-3.5 rounded-xl overflow-hidden border border-[#222B35] bg-[#0D1115] max-h-96 flex items-center justify-center cursor-zoom-in select-none"
+            className="group relative mb-3.5 w-full h-56 sm:h-64 rounded-xl overflow-hidden border border-[#222B35] bg-[#0D1115] flex items-center justify-center cursor-zoom-in select-none"
             role="button"
             tabIndex={0}
             onKeyDown={(e) => {
@@ -353,14 +353,14 @@ export const DynamoCard: React.FC<DynamoCardProps> = ({
                 setIsImageModalOpen(true);
               }
             }}
-            title="Haz clic para ver la imagen completa"
+            title="Haz clic para expandir imagen completa (estilo Twitter)"
           >
             <img
               src={dynamo.image_url}
               alt="Multimedia adjunta al Dynamo"
               loading="lazy"
               decoding="async"
-              className="w-full h-auto max-h-96 object-cover object-center transition-all duration-300 group-hover:scale-[1.015] group-hover:brightness-105"
+              className="w-full h-full object-cover object-center transition-all duration-300 group-hover:scale-[1.02] group-hover:brightness-105"
               onError={(e) => {
                 // Gracefully hide element if image fails to load
                 (e.currentTarget.parentElement as HTMLElement)?.classList.add('hidden');

@@ -66,16 +66,21 @@ export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
         </button>
       </div>
 
-      {/* Main Image Container */}
+      {/* Main Image Container - Clicking image also zooms out/closes like Twitter */}
       <div
-        className="relative max-w-[95vw] max-h-[90vh] flex items-center justify-center select-none cursor-default"
-        onClick={(e) => e.stopPropagation()}
+        className="relative max-w-[96vw] max-h-[90vh] flex items-center justify-center select-none cursor-zoom-out"
+        onClick={onClose}
       >
         <img
           src={imageUrl}
           alt={altText}
-          className="max-w-[95vw] max-h-[90vh] w-auto h-auto object-contain rounded-lg shadow-2xl transition-all"
+          className="max-w-[96vw] max-h-[90vh] w-auto h-auto object-contain rounded-lg shadow-2xl transition-transform duration-200 hover:scale-[0.99]"
         />
+      </div>
+
+      {/* Subtle bottom indicator */}
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-stone-400 text-xs px-3 py-1 rounded-full bg-stone-900/80 backdrop-blur-md border border-stone-800 shadow-md pointer-events-none select-none">
+        Haz clic en la imagen para volver
       </div>
     </div>
   );
