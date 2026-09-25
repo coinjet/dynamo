@@ -43,7 +43,7 @@ export const SingleDynamoView: React.FC<SingleDynamoViewProps> = ({
     setIsModerated(false);
 
     dynamosService
-      .getDynamoById(dynamoId)
+      .getDynamoById(dynamoId, user?.id)
       .then((data) => {
         if (!isMounted) return;
         if (!data) {
@@ -77,6 +77,42 @@ export const SingleDynamoView: React.FC<SingleDynamoViewProps> = ({
 
     return () => {
       isMounted = false;
+    };
+  }, [dynamoId, user?.id]);
+
+  // Real-time updates for this viewed Dynamo (lightning pulse, expiration extension, moderation)
+  useEffect(() => {
+    const unsubscribe = dynamosService.subscribeToNewDynamos(
+      () => {},
+      (update) => {
+        if (update.id !== dynamoId) return;
+
+        if (update.status === 'hidden') {
+          setIsModerated(true);
+          return;
+        }
+
+        const isTimeExpired = new Date(update.expires_at).getTime() <= Date.now() || update.status === 'expired';
+        if (isTimeExpired) {
+          setIsExpired(true);
+          return;
+        }
+
+        setDynamo((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            expires_at: update.expires_at || prev.expires_at,
+            status: update.status || prev.status,
+            image_url: update.image_url !== undefined ? update.image_url : prev.image_url,
+            energy_gifts_count: update.energy_gifts_count !== undefined ? update.energy_gifts_count : prev.energy_gifts_count,
+          };
+        });
+      }
+    );
+
+    return () => {
+      unsubscribe();
     };
   }, [dynamoId]);
 

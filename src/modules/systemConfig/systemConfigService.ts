@@ -21,7 +21,12 @@ export const systemConfigService = {
       const config: any = { ...DEFAULT_SYSTEM_SETTINGS };
       if (data && data.length > 0) {
         data.forEach((row: any) => {
-          config[row.key] = row.value;
+          let val = row.value;
+          if (typeof val === 'string') {
+            if (val.toLowerCase() === 'true') val = true;
+            else if (val.toLowerCase() === 'false') val = false;
+          }
+          config[row.key] = val;
         });
 
         // Mirror legacy / alternative switch names for backwards compatibility

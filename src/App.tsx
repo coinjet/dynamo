@@ -37,6 +37,7 @@ import { PublicFooter } from '@/src/components/layout/PublicFooter';
 import { LegalDocsModal, LegalDocType } from '@/src/components/legal/LegalDocsModal';
 import { authService } from '@/src/modules/auth/authService';
 import { relationshipsService } from '@/src/modules/relationships/relationshipsService';
+import { referralsService } from '@/src/modules/referrals/referralsService';
 import { Zap, Plus, RefreshCw, Sparkles, AlertTriangle, CheckCircle2, Users, UserCheck, Flame, Shield, Trophy, Settings, ShieldAlert } from 'lucide-react';
 
 // Code-split heavy modules with React.lazy
@@ -51,6 +52,7 @@ const EconomyModal = React.lazy(() => import('@/src/components/economy/EconomyMo
 const ReportModal = React.lazy(() => import('@/src/components/moderation/ReportModal').then((m) => ({ default: m.ReportModal })));
 const SingleDynamoView = React.lazy(() => import('@/src/components/dynamos/SingleDynamoView').then((m) => ({ default: m.SingleDynamoView })));
 const PublicProfileView = React.lazy(() => import('@/src/components/profiles/PublicProfileView').then((m) => ({ default: m.PublicProfileView })));
+const InviteModal = React.lazy(() => import('@/src/components/referrals/InviteModal').then((m) => ({ default: m.InviteModal })));
 
 const PAGE_SIZE = 20;
 
@@ -72,13 +74,37 @@ function DynamoAppContent() {
   const [pendingNewDynamos, setPendingNewDynamos] = useState<Dynamo[]>([]);
   const [discoveryInitialSection, setDiscoveryInitialSection] = useState<DiscoverySection>('tendencias');
   const [discoveryHashtag, setDiscoveryHashtag] = useState<string | null>(null);
+  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
 
-  // Sync URL paths and hash (/admin, /settings, /d/:id, /@username, etc.)
+  // Sync URL paths and hash (/admin, /settings, /d/:id, /@username, /join, /terms, etc.)
   useEffect(() => {
     const handleUrlChange = () => {
       const path = window.location.pathname;
       const hash = window.location.hash;
       const cleanHash = hash.replace(/^#\/?/, '');
+
+      // Capture referral or growth ref code if present
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const ref = urlParams.get('ref');
+        if (ref) {
+          referralsService.setStoredReferralCode(ref);
+          referralsService.trackEvent(ref, 'click');
+          referralsService.trackEvent(ref, 'landing_view');
+        }
+      } catch {}
+
+      // Handle /share invitation route
+      if (path === '/share' || cleanHash === 'share') {
+        if (user) {
+          setIsInviteModalOpen(true);
+        } else {
+          setAuthModalMode('register');
+          setIsAuthModalOpen(true);
+        }
+        setCurrentTab((prev) => (prev === 'landing' || prev === 'feed' ? prev : 'feed'));
+        return;
+      }
 
       // 1. Single Dynamo: /d/:id or #/d/:id
       const dynamoMatch = path.match(/^\/d\/([a-zA-Z0-9_-]+)/) || cleanHash.match(/^d\/([a-zA-Z0-9_-]+)/);
@@ -88,45 +114,96 @@ function DynamoAppContent() {
         return;
       }
 
-      // 2. Public Profile: /@username or #/@username
-      const profileMatch = path.match(/^\/@([a-zA-Z0-9_.-]+)/) || cleanHash.match(/^@([a-zA-Z0-9_.-]+)/);
+      // 2. Public Profile: /@username, /u/username, or #/@username
+      const profileMatch = path.match(/^\/(?:@|u\/)([a-zA-Z0-9_.-]+)/) || cleanHash.match(/^(?:@|u\/)([a-zA-Z0-9_.-]+)/);
       if (profileMatch) {
         setActiveUsername(profileMatch[1]);
         setCurrentTab('public-profile');
         return;
       }
 
-      // 3. /admin
+      // 3. /join: Directs to public landing with referral context (NO direct AuthModal popup)
+      if (path === '/join' || cleanHash === 'join') {
+        setCurrentTab('landing');
+        return;
+      }
+
+      // 4. /register or /registro: Opens registration flow directly
+      if (path === '/register' || path === '/registro' || cleanHash === 'register' || cleanHash === 'registro') {
+        const storedRef = referralsService.getStoredReferralCode();
+        if (storedRef) {
+          referralsService.trackEvent(storedRef, 'signup_started');
+        }
+        setAuthModalMode('register');
+        setIsAuthModalOpen(true);
+        setCurrentTab((prev) => (prev === 'landing' || prev === 'feed' ? prev : 'feed'));
+        return;
+      }
+
+      // 4. /login: Opens login modal
+      if (path === '/login' || path === '/ingresar' || cleanHash === 'login') {
+        setAuthModalMode('login');
+        setIsAuthModalOpen(true);
+        setCurrentTab((prev) => (prev === 'landing' || prev === 'feed' ? prev : 'feed'));
+        return;
+      }
+
+      // 5. Legal and Information direct routes
+      const legalMap: Record<string, LegalDocType> = {
+        '/terms': 'terms',
+        '/terminos': 'terms',
+        '/privacy': 'privacy',
+        '/privacidad': 'privacy',
+        '/community': 'community',
+        '/normas': 'community',
+        '/safety': 'safety',
+        '/seguridad': 'safety',
+        '/about': 'about',
+      };
+      if (legalMap[path] || (cleanHash && legalMap['/' + cleanHash])) {
+        const doc = legalMap[path] || legalMap['/' + cleanHash];
+        handleOpenLegalDoc(doc);
+        setCurrentTab((prev) => (prev === 'admin' || prev === 'settings' ? prev : 'feed'));
+        return;
+      }
+
+      // 6. /landing
+      if (path === '/landing' || hash === '#/landing' || hash === '#landing') {
+        setCurrentTab('landing');
+        return;
+      }
+
+      // 7. /admin
       if (path === '/admin' || hash === '#/admin' || hash === '#admin') {
         setCurrentTab('admin');
         return;
       }
 
-      // 4. /settings
+      // 8. /settings
       if (path === '/settings' || hash === '#/settings' || hash === '#settings') {
         setCurrentTab('settings');
         return;
       }
 
-      // 5. /discovery
+      // 9. /discovery
       if (path === '/discovery' || hash === '#/discovery') {
         setCurrentTab('discovery');
         return;
       }
 
-      // 6. /best-dynamos
+      // 10. /best-dynamos
       if (path === '/best-dynamos' || hash === '#/best-dynamos') {
         setCurrentTab('best-dynamos');
         return;
       }
 
-      // 7. Feed / root
+      // 11. Feed / root
       if (path === '/' || path === '/feed' || path === '' || hash === '#/feed') {
         setCurrentTab((prev) => (prev === 'admin' || prev === 'settings' || prev === 'not-found' || prev === 'single-dynamo' || prev === 'public-profile' ? 'feed' : prev));
         return;
       }
 
-      // 8. Unknown path -> 404
+      // 12. Unknown path -> 404
       setCurrentTab('not-found');
     };
 
@@ -308,45 +385,65 @@ function DynamoAppContent() {
   const dynamosRef = useRef(dynamos);
   dynamosRef.current = dynamos;
 
-  // Realtime subscription for incoming dynamos in feed (stable single connection)
+  // Realtime subscription for incoming dynamos and energy updates in feed (stable single connection)
   useEffect(() => {
-    const unsubscribe = dynamosService.subscribeToNewDynamos(async (newDynamo) => {
-      const currentUser = userRef.current;
-      const currentFilter = feedFilterRef.current;
-      const currentDynamos = dynamosRef.current;
+    const unsubscribe = dynamosService.subscribeToNewDynamos(
+      async (newDynamo) => {
+        const currentUser = userRef.current;
+        const currentFilter = feedFilterRef.current;
+        const currentDynamos = dynamosRef.current;
 
-      // 1. Ignore if authored by current user (already prepended when created)
-      if (currentUser && newDynamo.user_id === currentUser.id) return;
+        // 1. Ignore if authored by current user (already prepended when created)
+        if (currentUser && newDynamo.user_id === currentUser.id) return;
 
-      // 2. Ignore if already loaded in dynamos
-      if (currentDynamos.some((d) => d.id === newDynamo.id)) return;
+        // 2. Ignore if already loaded in dynamos
+        if (currentDynamos.some((d) => d.id === newDynamo.id)) return;
 
-      // 3. Filter check if user has blocked/muted relationships
-      if (currentUser?.id) {
-        try {
-          const excludedIds = await relationshipsService.getExcludedUserIdsForFeed(currentUser.id);
-          if (excludedIds.includes(newDynamo.user_id)) return;
+        // 3. Filter check if user has blocked/muted relationships
+        if (currentUser?.id) {
+          try {
+            const excludedIds = await relationshipsService.getExcludedUserIdsForFeed(currentUser.id);
+            if (excludedIds.includes(newDynamo.user_id)) return;
 
-          if (currentFilter === 'siguiendo') {
-            const following = await relationshipsService.getFollowingIds(currentUser.id);
-            if (!following.includes(newDynamo.user_id)) return;
-          } else if (currentFilter === 'amigos') {
-            const friends = await relationshipsService.getFriendsIds(currentUser.id);
-            if (!friends.includes(newDynamo.user_id)) return;
+            if (currentFilter === 'siguiendo') {
+              const following = await relationshipsService.getFollowingIds(currentUser.id);
+              if (!following.includes(newDynamo.user_id)) return;
+            } else if (currentFilter === 'amigos') {
+              const friends = await relationshipsService.getFriendsIds(currentUser.id);
+              if (!friends.includes(newDynamo.user_id)) return;
+            }
+          } catch (e) {
+            console.warn('Error checking relationship for realtime dynamo:', e);
           }
-        } catch (e) {
-          console.warn('Error checking relationship for realtime dynamo:', e);
+        } else {
+          // Unauthenticated visitor in 'siguiendo' or 'amigos' should not see dynamos
+          if (currentFilter === 'siguiendo' || currentFilter === 'amigos') return;
         }
-      } else {
-        // Unauthenticated visitor in 'siguiendo' or 'amigos' should not see dynamos
-        if (currentFilter === 'siguiendo' || currentFilter === 'amigos') return;
-      }
 
-      setPendingNewDynamos((prev) => {
-        if (prev.some((p) => p.id === newDynamo.id)) return prev;
-        return [newDynamo, ...prev];
-      });
-    });
+        // Live prepend directly into feed so the user sees it without needing to refresh
+        setDynamos((prev) => {
+          if (prev.some((p) => p.id === newDynamo.id)) return prev;
+          return [newDynamo, ...prev];
+        });
+      },
+      (update) => {
+        const { id, expires_at, status, image_url, energy_gifts_count } = update;
+        setDynamos((prev) =>
+          prev
+            .map((d) => {
+              if (d.id !== id) return d;
+              return {
+                ...d,
+                expires_at: expires_at || d.expires_at,
+                status: status || d.status,
+                image_url: image_url !== undefined ? image_url : d.image_url,
+                energy_gifts_count: energy_gifts_count !== undefined ? energy_gifts_count : d.energy_gifts_count,
+              };
+            })
+            .filter((d) => d.status === 'active' && new Date(d.expires_at).getTime() > Date.now())
+        );
+      }
+    );
 
     return () => {
       unsubscribe();
@@ -557,6 +654,7 @@ function DynamoAppContent() {
         onGoToSettings={handleGoToSettings}
         onOpenEconomy={() => setIsEconomyModalOpen(true)}
         economyRefreshTrigger={economyRefreshTrigger}
+        onOpenInvite={() => setIsInviteModalOpen(true)}
       />
 
       {/* Account Suspension Banner */}
@@ -815,7 +913,10 @@ function DynamoAppContent() {
         {/* Tab 2: Profile */}
         {currentTab === 'profile' && (
           <Suspense fallback={<ProfileSkeleton />}>
-            <ProfileView onGoToSettings={handleGoToSettings} />
+            <ProfileView
+              onGoToSettings={handleGoToSettings}
+              onOpenInvite={() => setIsInviteModalOpen(true)}
+            />
           </Suspense>
         )}
 
@@ -825,6 +926,7 @@ function DynamoAppContent() {
             <SettingsView
               onGoToHome={handleGoToHome}
               onGoToProfile={() => setCurrentTab('profile')}
+              onOpenInvite={() => setIsInviteModalOpen(true)}
             />
           </Suspense>
         )}
@@ -1162,6 +1264,16 @@ function DynamoAppContent() {
             isOpen={isEconomyModalOpen}
             onClose={() => setIsEconomyModalOpen(false)}
             userId={user?.id}
+          />
+        )}
+      </Suspense>
+
+      <Suspense fallback={null}>
+        {isInviteModalOpen && (
+          <InviteModal
+            isOpen={isInviteModalOpen}
+            onClose={() => setIsInviteModalOpen(false)}
+            userUsername={profile?.username}
           />
         )}
       </Suspense>

@@ -319,36 +319,10 @@ export const settingsService = {
       };
     }
 
-    if (import.meta.env.PROD || isSupabaseConfigured) {
-      throw new Error('No es posible procesar la solicitud en este momento.');
+    if (!isSupabaseConfigured) {
+      throw new Error('Servicio de eliminación no disponible en este momento.');
     }
 
-    // Local fallback for sandbox testing
-    try {
-      const store = getLocalSettingsStore();
-      delete store[userId];
-      saveLocalSettingsStore(store);
-
-      const profilesRaw = localStorage.getItem('dynamo_mock_profiles_store');
-      if (profilesRaw) {
-        const profiles = JSON.parse(profilesRaw);
-        if (profiles[userId]) {
-          profiles[userId].status = 'deactivated';
-          profiles[userId].bio = 'Cuenta eliminada por el usuario.';
-          profiles[userId].avatar = '';
-          profiles[userId].username = `del_${userId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 10)}`;
-          localStorage.setItem('dynamo_mock_profiles_store', JSON.stringify(profiles));
-        }
-      }
-
-      localStorage.removeItem('dynamo_auth_session');
-    } catch {
-      // ignore
-    }
-
-    return {
-      success: true,
-      message: 'Cuenta eliminada exitosamente.',
-    };
+    throw new Error('No es posible procesar la solicitud en este momento.');
   },
 };

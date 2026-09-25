@@ -17,11 +17,14 @@ export const isSupabaseConfigured = Boolean(
 
 // Environment flags
 export const isProduction = Boolean(env.PROD);
-export const isDemoMode = !isSupabaseConfigured && Boolean(env.DEV || !isProduction);
 export const isMissingProductionConfig = !isSupabaseConfigured && isProduction;
+
+// Inert fallback only to prevent top-level import crashes when environment variables are being initialized
+const fallbackUrl = 'https://dynamo-unconfigured.supabase.co';
+const fallbackKey = 'unconfigured-public-anon-key';
 
 export const supabase = isSupabaseConfigured
   ? createClient(supabaseUrl, supabaseAnonKey)
-  : createClient('https://mock-dynamo.supabase.co', 'mock-anon-key', {
-      auth: { persistSession: true, autoRefreshToken: false },
+  : createClient(fallbackUrl, fallbackKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
     });

@@ -6,84 +6,41 @@ import {
 } from '@/src/modules/auth/authValidation';
 import { mediaStorageService } from '@/src/modules/storage/mediaStorageService';
 
-const LOCAL_STORAGE_PROFILES_KEY = 'dynamo_mock_profiles_store';
-
-function getLocalProfiles(): Record<string, Profile> {
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_PROFILES_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {
-    // ignore
-  }
-  return {
-    'usr_f891a2b3-4c5d-6e7f-8a9b-0c1d2e3f4a5b': {
-      id: 'usr_f891a2b3-4c5d-6e7f-8a9b-0c1d2e3f4a5b',
-      username: 'sol_valenzuela',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&h=256&q=80',
-      bio: 'Cronista nocturna. ⚡',
-      created_at: '2026-08-15T12:00:00Z',
-      role: 'user',
-      status: 'active',
-    },
-  };
-}
-
-function saveLocalProfiles(profiles: Record<string, Profile>) {
-  localStorage.setItem(LOCAL_STORAGE_PROFILES_KEY, JSON.stringify(profiles));
-}
-
 export const profilesService = {
   async getProfile(userId: string): Promise<Profile | null> {
-    if (isSupabaseConfigured) {
-      try {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('id, username, avatar, bio, created_at, role, status')
-          .eq('id', userId)
-          .maybeSingle();
+    if (!userId || !isSupabaseConfigured) return null;
 
-        if (error || !data) return null;
-        return data as Profile;
-      } catch {
-        return null;
-      }
-    }
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, username, avatar, bio, created_at, role, status')
+        .eq('id', userId)
+        .maybeSingle();
 
-    if (import.meta.env.PROD || isSupabaseConfigured) {
+      if (error || !data) return null;
+      return data as Profile;
+    } catch {
       return null;
     }
-
-    const profiles = getLocalProfiles();
-    return profiles[userId] || null;
   },
 
   async getProfileByUsername(username: string): Promise<Profile | null> {
     const cleanUsername = username.trim().toLowerCase();
-    if (isSupabaseConfigured) {
-      try {
-        // Privacy rule: Public profiles query MUST NOT request role, email, or internal admin data
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('id, username, avatar, bio, created_at, status')
-          .ilike('username', cleanUsername)
-          .maybeSingle();
+    if (!cleanUsername || !isSupabaseConfigured) return null;
 
-        if (error || !data) return null;
-        return data as Profile;
-      } catch {
-        return null;
-      }
-    }
+    try {
+      // Privacy rule: Public profiles query MUST NOT request role, email, or internal admin data
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, username, avatar, bio, created_at, status')
+        .ilike('username', cleanUsername)
+        .maybeSingle();
 
-    if (import.meta.env.PROD || isSupabaseConfigured) {
+      if (error || !data) return null;
+      return data as Profile;
+    } catch {
       return null;
     }
-
-    const profiles = getLocalProfiles();
-    const found = Object.values(profiles).find(
-      (p) => p.username.toLowerCase() === cleanUsername
-    );
-    return found || null;
   },
 
   async isUsernameAvailable(username: string, excludeUserId?: string): Promise<boolean> {
@@ -95,38 +52,31 @@ export const profilesService = {
       return false;
     }
 
-    if (isSupabaseConfigured) {
-      try {
-        let query = supabase
-          .from('profiles')
-          .select('id', { count: 'exact', head: true })
-          .ilike('username', cleanUsername);
+    if (!isSupabaseConfigured) return false;
 
-        if (excludeUserId) {
-          query = query.neq('id', excludeUserId);
-        }
+    try {
+      let query = supabase
+        .from('profiles')
+        .select('id', { count: 'exact', head: true })
+        .ilike('username', cleanUsername);
 
-        const { count, error } = await query;
-        if (error) return false;
-        return (count ?? 0) === 0;
-      } catch {
-        return false;
+      if (excludeUserId) {
+        query = query.neq('id', excludeUserId);
       }
-    }
 
-    if (import.meta.env.PROD || isSupabaseConfigured) {
+      const { count, error } = await query;
+      if (error) return false;
+      return (count ?? 0) === 0;
+    } catch {
       return false;
     }
-
-    // Local fallback check
-    const profiles = getLocalProfiles();
-    const existing = Object.values(profiles).find(
-      (p) => p.username.toLowerCase() === cleanUsername && p.id !== excludeUserId
-    );
-    return !existing;
   },
 
   async updateProfile(userId: string, updates: EditProfileDTO): Promise<Profile> {
+    if (!isSupabaseConfigured) {
+      throw new Error('Servicio de perfiles no disponible.');
+    }
+
     const payload: Partial<Profile> = {};
 
     // 1. Validate username if provided
@@ -163,46 +113,19 @@ export const profilesService = {
       payload.avatar = cleanAvatar;
     }
 
-    if (isSupabaseConfigured) {
-      // Row Level Security and trigger ensure user only updates own id, and cannot alter role/id/created_at
-      const { data, error } = await supabase
-        .from('profiles')
-        .update(payload)
-        .eq('id', userId)
-        .select('id, username, avatar, bio, created_at, role, status')
-        .maybeSingle();
+    // Row Level Security and trigger ensure user only updates own id, and cannot alter role/id/created_at
+    const { data, error } = await supabase
+      .from('profiles')
+      .update(payload)
+      .eq('id', userId)
+      .select('id, username, avatar, bio, created_at, role, status')
+      .maybeSingle();
 
-      if (error) {
-        throw new Error(error.message);
-      }
-
-      return data as Profile;
+    if (error) {
+      throw new Error(error.message);
     }
 
-    if (import.meta.env.PROD || isSupabaseConfigured) {
-      throw new Error('Estamos teniendo problemas de conexión. Inténtalo nuevamente.');
-    }
-
-    // Local fallback (development only)
-    const profiles = getLocalProfiles();
-    const current = profiles[userId] || {
-      id: userId,
-      username: 'usuario',
-      avatar: '',
-      bio: '',
-      created_at: new Date().toISOString(),
-      role: 'user',
-      status: 'active',
-    };
-
-    const updated: Profile = {
-      ...current,
-      ...payload,
-    };
-
-    profiles[userId] = updated;
-    saveLocalProfiles(profiles);
-
-    return updated;
+    return data as Profile;
   },
 };
+

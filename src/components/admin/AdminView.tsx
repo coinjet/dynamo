@@ -11,6 +11,7 @@ import { AdminMultimediaView } from './AdminMultimediaView';
 import { AdminAdvertisingView } from './AdminAdvertisingView';
 import { AdminConfigView } from './AdminConfigView';
 import { AdminEmergencyView } from './AdminEmergencyView';
+import { AdminGrowthView } from './AdminGrowthView';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -27,6 +28,7 @@ import {
   Sliders,
   AlertOctagon,
   Scale,
+  TrendingUp,
 } from 'lucide-react';
 import { AdminLegalView } from './AdminLegalView';
 
@@ -38,6 +40,7 @@ export type AdminTab =
   | 'dashboard'
   | 'reports'
   | 'users'
+  | 'growth'
   | 'communications'
   | 'multimedia'
   | 'advertising'
@@ -285,6 +288,19 @@ export const AdminView: React.FC<AdminViewProps> = ({ onGoToHome }) => {
         </button>
 
         <button
+          id="btn-admin-tab-growth"
+          onClick={() => setActiveTab('growth')}
+          className={`flex items-center gap-2 px-3 py-2 rounded-lg font-medium transition shrink-0 ${
+            activeTab === 'growth'
+              ? 'bg-amber-500 text-black font-semibold'
+              : 'text-stone-400 hover:text-white hover:bg-stone-800/60'
+          }`}
+        >
+          <TrendingUp className="w-4 h-4" />
+          <span>Invitaciones / Crecimiento</span>
+        </button>
+
+        <button
           id="btn-admin-tab-communications"
           onClick={() => setActiveTab('communications')}
           className={`flex items-center gap-2 px-3 py-2 rounded-lg font-medium transition shrink-0 ${
@@ -401,6 +417,10 @@ export const AdminView: React.FC<AdminViewProps> = ({ onGoToHome }) => {
             initialFilter={usersInitialFilter}
             onRefreshStats={() => loadStats(user.id)}
           />
+        )}
+
+        {activeTab === 'growth' && user?.id && (
+          <AdminGrowthView adminUserId={user.id} />
         )}
 
         {activeTab === 'communications' && user?.id && (

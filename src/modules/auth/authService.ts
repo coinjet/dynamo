@@ -15,61 +15,32 @@ import {
   AUTH_LIMITS,
 } from './authValidation';
 import { profilesService } from '@/src/modules/profiles/profilesService';
-
-const LOCAL_STORAGE_SESSION_KEY = 'dynamo_auth_session';
-
-const DEFAULT_DEMO_USER: UserProfile = {
-  id: 'usr_f891a2b3-4c5d-6e7f-8a9b-0c1d2e3f4a5b',
-  username: 'sol_valenzuela',
-  avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&h=256&q=80',
-  bio: 'Cronista nocturna. ⚡',
-  created_at: '2026-08-15T12:00:00Z',
-  role: 'user',
-  status: 'active',
-};
+import { referralsService } from '@/src/modules/referrals/referralsService';
 
 export const authService = {
   /**
-   * Retrieves active session from Supabase or local sandbox.
+   * Retrieves active session from Supabase. Zero mock or fake sessions.
    */
   async getInitialSession(): Promise<AuthSession | null> {
-    if (isSupabaseConfigured) {
-      try {
-        const {
-          data: { session },
-          error,
-        } = await supabase.auth.getSession();
-        if (error || !session) return null;
+    if (!isSupabaseConfigured) return null;
 
-        const profile = await profilesService.getProfile(session.user.id);
-        if (profile) {
-          const email_confirmed_at = session.user.email_confirmed_at || (session.user as any).confirmed_at || null;
-          return {
-            user: { id: session.user.id, email: session.user.email, email_confirmed_at },
-            profile,
-          };
-        }
-      } catch (err) {
-        console.warn('Error al verificar sesión de Supabase:', err);
+    try {
+      const {
+        data: { session },
+        error,
+      } = await supabase.auth.getSession();
+      if (error || !session) return null;
+
+      const profile = await profilesService.getProfile(session.user.id);
+      if (profile) {
+        const email_confirmed_at = session.user.email_confirmed_at || (session.user as any).confirmed_at || null;
+        return {
+          user: { id: session.user.id, email: session.user.email, email_confirmed_at },
+          profile,
+        };
       }
-    }
-
-    // In production without Supabase, never mock sessions or use demo accounts
-    if (import.meta.env.PROD && !isSupabaseConfigured) {
-      return null;
-    }
-
-    // Local-first sandbox fallback
-    const saved = localStorage.getItem(LOCAL_STORAGE_SESSION_KEY);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed?.user?.id && parsed?.profile) {
-          return parsed;
-        }
-      } catch {
-        localStorage.removeItem(LOCAL_STORAGE_SESSION_KEY);
-      }
+    } catch (err) {
+      console.warn('Error al verificar sesión de Supabase:', err);
     }
 
     return null;
@@ -132,93 +103,81 @@ export const authService = {
       cleanBio = bioCheck.sanitized;
     }
 
-    // Production check
-    if (import.meta.env.PROD && !isSupabaseConfigured) {
-      throw new Error('El servicio de registro no se encuentra disponible en este momento.');
+    if (!isSupabaseConfigured) {
+      throw new Error('El servicio de registro no se encuentra disponible.');
     }
 
+    const storedRef = referralsService.getStoredReferralCode();
+
     // Supabase Authentication
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase.auth.signUp({
-        email: params.email.trim(),
-        password: params.password,
-        options: {
-          emailRedirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
-          data: {
-            username: cleanUsername,
-            bio: cleanBio,
-          },
+    const { data, error } = await supabase.auth.signUp({
+      email: params.email.trim(),
+      password: params.password,
+      options: {
+        emailRedirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
+        data: {
+          username: cleanUsername,
+          bio: cleanBio,
+          is_age_confirmed: true,
+          min_age_certified: 16,
+          accepted_terms: true,
+          accepted_privacy: true,
+          accepted_community: true,
+          referral_code: storedRef || undefined,
         },
-      });
+      },
+    });
 
-      if (error) {
-        // Normalize error message without leaking sensitive internal details
-        if (error.message.toLowerCase().includes('already registered')) {
-          throw new Error('Este correo ya se encuentra registrado. Intenta iniciar sesión.');
-        }
-        throw new Error('No se pudo completar el registro. Por favor verifica tus datos.');
+    if (error) {
+      // Normalize error message without leaking sensitive internal details
+      if (error.message.toLowerCase().includes('already registered')) {
+        throw new Error('Este correo ya se encuentra registrado. Intenta iniciar sesión.');
       }
+      throw new Error('No se pudo completar el registro. Por favor verifica tus datos.');
+    }
 
-      if (!data.user) {
-        throw new Error('No se pudo crear la cuenta. Intenta de nuevo.');
-      }
+    if (!data.user) {
+      throw new Error('No se pudo crear la cuenta. Intenta de nuevo.');
+    }
 
-      // Fetch profile created securely by server-side trigger handle_new_user()
-      let { data: fetchedProfile, error: profileError } = await supabase
+    // Fetch profile created securely by server-side trigger handle_new_user()
+    let { data: fetchedProfile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id, username, avatar, bio, created_at, role, status')
+      .eq('id', data.user.id)
+      .maybeSingle();
+
+    // Brief retry in case handle_new_user() trigger execution has a micro-delay
+    if (!fetchedProfile) {
+      await new Promise((r) => setTimeout(r, 400));
+      const retry = await supabase
         .from('profiles')
         .select('id, username, avatar, bio, created_at, role, status')
         .eq('id', data.user.id)
         .maybeSingle();
-
-      // Brief retry in case handle_new_user() trigger execution has a micro-delay
-      if (!fetchedProfile) {
-        await new Promise((r) => setTimeout(r, 400));
-        const retry = await supabase
-          .from('profiles')
-          .select('id, username, avatar, bio, created_at, role, status')
-          .eq('id', data.user.id)
-          .maybeSingle();
-        fetchedProfile = retry.data;
-        profileError = retry.error;
-      }
-
-      if (!fetchedProfile) {
-        if (import.meta.env.DEV) {
-          console.error('[authService.signUp] El trigger server-side handle_new_user() no generó el perfil:', {
-            userId: data.user.id,
-            error: profileError,
-          });
-        }
-        // Strictly eliminate client-side fallback profile construction / fake objects
-        throw new Error('No pudimos cargar tu perfil tras el registro. Por favor, intenta iniciar sesión.');
-      }
-
-      const email_confirmed_at = data.user.email_confirmed_at || (data.user as any).confirmed_at || null;
-      return {
-        user: { id: data.user.id, email: data.user.email, email_confirmed_at },
-        profile: fetchedProfile as UserProfile,
-      };
+      fetchedProfile = retry.data;
+      profileError = retry.error;
     }
 
-    // Local Development Sandbox
-    const newId = 'usr_' + Math.random().toString(36).substring(2, 10);
-    const newProfile: UserProfile = {
-      id: newId,
-      username: cleanUsername,
-      avatar: `https://api.dicebear.com/7.x/identicon/svg?seed=${cleanUsername}`,
-      bio: cleanBio || 'Explorador en Dynamo.',
-      created_at: new Date().toISOString(),
-      role: 'user',
-      status: 'active',
-    };
+    if (!fetchedProfile) {
+      if (import.meta.env.DEV) {
+        console.error('[authService.signUp] El trigger server-side handle_new_user() no generó el perfil:', {
+          userId: data.user.id,
+          error: profileError,
+        });
+      }
+      // Strictly eliminate client-side fallback profile construction / fake objects
+      throw new Error('No pudimos cargar tu perfil tras el registro. Por favor, intenta iniciar sesión.');
+    }
 
-    const session: AuthSession = {
-      user: { id: newId, email: params.email.trim(), email_confirmed_at: new Date().toISOString() },
-      profile: newProfile,
-    };
+    // Clear stored referral code after successful sign up
+    referralsService.clearStoredReferralCode();
 
-    localStorage.setItem(LOCAL_STORAGE_SESSION_KEY, JSON.stringify(session));
-    return session;
+    const email_confirmed_at = data.user.email_confirmed_at || (data.user as any).confirmed_at || null;
+    return {
+      user: { id: data.user.id, email: data.user.email, email_confirmed_at },
+      profile: fetchedProfile as UserProfile,
+    };
   },
 
   /**
@@ -231,51 +190,41 @@ export const authService = {
       throw new Error('Credenciales inválidas. Por favor verifica tu correo y contraseña.');
     }
 
-    if (import.meta.env.PROD && !isSupabaseConfigured) {
-      throw new Error('El servicio de inicio de sesión no se encuentra disponible en este momento.');
+    if (!isSupabaseConfigured) {
+      throw new Error('El servicio de inicio de sesión no se encuentra disponible.');
     }
 
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password: params.password,
-      });
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password: params.password,
+    });
 
-      if (error || !data.user) {
-        // Generic security-conscious error
-        throw new Error('Credenciales incorrectas. Por favor verifica tu correo y contraseña.');
-      }
-
-      let profile = await profilesService.getProfile(data.user.id);
-      if (!profile) {
-        if (import.meta.env.DEV) {
-          console.error('[authService.signIn] Perfil no encontrado en base de datos para el usuario autenticado:', data.user.id);
-        }
-        // Profile must be created server-side by handle_new_user() trigger.
-        // Never invent usernames, derive from email, or upsert from client.
-        await supabase.auth.signOut();
-        throw new Error('No pudimos cargar tu perfil. Inténtalo nuevamente.');
-      }
-
-      if (profile.status === 'suspended') {
-        await supabase.auth.signOut();
-        throw new Error('Esta cuenta ha sido suspendida por el equipo de moderación debido a infracciones de las Normas de la Comunidad.');
-      }
-
-      const email_confirmed_at = data.user.email_confirmed_at || (data.user as any).confirmed_at || null;
-      return {
-        user: { id: data.user.id, email: data.user.email, email_confirmed_at },
-        profile,
-      };
+    if (error || !data.user) {
+      // Generic security-conscious error
+      throw new Error('Credenciales incorrectas. Por favor verifica tu correo y contraseña.');
     }
 
-    // Local Development Sandbox sign in (only when Supabase is not configured)
-    const session: AuthSession = {
-      user: { id: DEFAULT_DEMO_USER.id, email, email_confirmed_at: new Date().toISOString() },
-      profile: DEFAULT_DEMO_USER,
+    let profile = await profilesService.getProfile(data.user.id);
+    if (!profile) {
+      if (import.meta.env.DEV) {
+        console.error('[authService.signIn] Perfil no encontrado en base de datos para el usuario autenticado:', data.user.id);
+      }
+      // Profile must be created server-side by handle_new_user() trigger.
+      // Never invent usernames, derive from email, or upsert from client.
+      await supabase.auth.signOut();
+      throw new Error('No pudimos cargar tu perfil. Inténtalo nuevamente.');
+    }
+
+    if (profile.status === 'suspended') {
+      await supabase.auth.signOut();
+      throw new Error('Esta cuenta ha sido suspendida por el equipo de moderación debido a infracciones de las Normas de la Comunidad.');
+    }
+
+    const email_confirmed_at = data.user.email_confirmed_at || (data.user as any).confirmed_at || null;
+    return {
+      user: { id: data.user.id, email: data.user.email, email_confirmed_at },
+      profile,
     };
-    localStorage.setItem(LOCAL_STORAGE_SESSION_KEY, JSON.stringify(session));
-    return session;
   },
 
   /**
@@ -377,6 +326,5 @@ export const authService = {
     if (isSupabaseConfigured) {
       await supabase.auth.signOut();
     }
-    localStorage.removeItem(LOCAL_STORAGE_SESSION_KEY);
   },
 };

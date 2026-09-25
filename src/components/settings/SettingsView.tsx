@@ -52,11 +52,13 @@ const PRESET_AVATARS = [
 interface SettingsViewProps {
   onGoToHome?: () => void;
   onGoToProfile?: () => void;
+  onOpenInvite?: () => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
   onGoToHome,
   onGoToProfile,
+  onOpenInvite,
 }) => {
   const { user, profile, signOut, updateProfileState, refreshProfile } = useAuth();
 
@@ -555,6 +557,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </button>
             </div>
           </form>
+
+          {/* Invitaciones a Dynamo ⚡ */}
+          {onOpenInvite && (
+            <div className="rounded-2xl border border-stone-800 bg-[#141A20] p-5 sm:p-6 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/15 text-amber-400 shrink-0">
+                    <Zap className="w-5 h-5 fill-amber-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Programa de Invitaciones ⚡</h3>
+                    <p className="text-xs text-stone-400">
+                      Comparte tu enlace personal, trae amigos y consulta estadísticas reales de registro.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  id="btn-settings-open-invite"
+                  onClick={onOpenInvite}
+                  className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 text-black text-xs font-bold hover:bg-amber-400 transition cursor-pointer shrink-0 shadow-sm"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Gestionar Invitaciones</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

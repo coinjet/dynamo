@@ -16,76 +16,18 @@ import { systemConfigService } from '../systemConfig/systemConfigService';
 
 const LOCAL_STORAGE_DYNAMOS_KEY = 'dynamo_feed_records';
 
-const SEED_DYNAMOS: Dynamo[] = [
-  {
-    id: 'dyn_001',
-    user_id: 'usr_mateo_99',
-    content: 'La plaza central despertó con niebla fría y aroma a café tostado en leña. Nada vence iniciar la mañana escribiendo sin algoritmos que te persigan. #cronica #cafe #manana',
-    created_at: new Date(Date.now() - 1000 * 60 * 60 * 3).toISOString(), // 3 hours ago
-    expires_at: new Date(Date.now() + 1000 * 60 * 60 * 21).toISOString(), // 21 hours left (Active)
-    status: 'active',
-    author: {
-      id: 'usr_mateo_99',
-      username: 'mateo_delvalle',
-      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=256&h=256&q=80',
-      bio: 'Arquitecto y peatón observador.',
-      created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 60).toISOString(),
-      status: 'active',
-    },
-    hashtags: ['cronica', 'cafe', 'manana'],
-    energy_gifts_count: 5,
-    replies_count: 3,
-  },
-  {
-    id: 'dyn_002',
-    user_id: 'usr_lucia_sound',
-    content: '¿Se han fijado que cuando una idea tiene fecha de caducidad te esfuerzas más en decir la verdad? El microcontenido no debería durar para siempre. ⚡',
-    created_at: new Date(Date.now() - 1000 * 60 * 60 * 22).toISOString(), // 22 hours ago
-    expires_at: new Date(Date.now() + 1000 * 60 * 85).toISOString(), // 85 minutes left (Casi desaparece: < 2 horas)
-    status: 'active',
-    author: {
-      id: 'usr_lucia_sound',
-      username: 'lucia_cordoba',
-      avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=256&h=256&q=80',
-      bio: 'Diseño sonoro y microensayos en directo.',
-      created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 12).toISOString(),
-      status: 'active',
-    },
-    hashtags: ['ideas', 'reflexion'],
-    energy_gifts_count: 2,
-    replies_count: 1,
-  },
-  {
-    id: 'dyn_003',
-    user_id: 'usr_f891a2b3-4c5d-6e7f-8a9b-0c1d2e3f4a5b',
-    content: 'Lanzando la primera señal en Dynamo. Construcción limpia, PWA nativa, base de datos modular y energía comunitaria. ¿Quién está listo para el cambio de paradigma? #dynamo #webdev',
-    created_at: new Date(Date.now() - 1000 * 60 * 60 * 1).toISOString(),
-    expires_at: new Date(Date.now() + 1000 * 60 * 60 * 23).toISOString(), // 23 hours left (Active)
-    status: 'active',
-    author: {
-      id: 'usr_f891a2b3-4c5d-6e7f-8a9b-0c1d2e3f4a5b',
-      username: 'sol_valenzuela',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&h=256&q=80',
-      bio: 'Cronista nocturna, amante de los tacos al pastor y el código limpio. ⚡',
-      created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30).toISOString(),
-      status: 'active',
-    },
-    hashtags: ['dynamo', 'webdev'],
-    energy_gifts_count: 8,
-    replies_count: 4,
-  }
-];
-
 function getStoredDynamos(): Dynamo[] {
+  if (import.meta.env.PROD || isSupabaseConfigured) {
+    return [];
+  }
   const stored = localStorage.getItem(LOCAL_STORAGE_DYNAMOS_KEY);
   if (!stored) {
-    localStorage.setItem(LOCAL_STORAGE_DYNAMOS_KEY, JSON.stringify(SEED_DYNAMOS));
-    return SEED_DYNAMOS;
+    return [];
   }
   try {
     return JSON.parse(stored);
   } catch {
-    return SEED_DYNAMOS;
+    return [];
   }
 }
 
@@ -542,7 +484,7 @@ export const dynamosService = {
     if (isSupabaseConfigured) {
       try {
         const nowIso = new Date().toISOString();
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('dynamos')
           .select(`
             id,
@@ -553,7 +495,7 @@ export const dynamosService = {
             expires_at,
             status,
             hashtags,
-            author:user_id (id, username, avatar, bio, status, created_at),
+            profiles:user_id (id, username, avatar, bio, status, created_at),
             dynamo_gifts(count),
             replies(count)
           `)
@@ -562,8 +504,13 @@ export const dynamosService = {
           .gt('expires_at', nowIso)
           .order('created_at', { ascending: false });
 
+        if (error) {
+          console.warn('Error in getUserDynamos query:', error);
+          return [];
+        }
+
         return (data || [])
-          .filter((item: any) => item.author?.status !== 'suspended')
+          .filter((item: any) => item.profiles?.status !== 'suspended')
           .map((item: any) => ({
             id: item.id,
             user_id: item.user_id,
@@ -572,12 +519,13 @@ export const dynamosService = {
             created_at: item.created_at,
             expires_at: item.expires_at,
             status: item.status,
-            author: item.author,
+            author: item.profiles,
             hashtags: item.hashtags || extractHashtags(item.content).tags,
             energy_gifts_count: item.dynamo_gifts?.[0]?.count || 0,
             replies_count: item.replies?.[0]?.count || 0,
           }));
-      } catch {
+      } catch (err) {
+        console.warn('Error in getUserDynamos:', err);
         return [];
       }
     }
@@ -591,7 +539,7 @@ export const dynamosService = {
     return current.filter((d) => d.user_id === userId && d.status === 'active' && new Date(d.expires_at).getTime() > now);
   },
 
-  async getDynamoById(dynamoId: string): Promise<Dynamo | null> {
+  async getDynamoById(dynamoId: string, currentUserId?: string): Promise<Dynamo | null> {
     if (isSupabaseConfigured) {
       try {
         const { data, error } = await supabase
@@ -605,7 +553,7 @@ export const dynamosService = {
             expires_at,
             status,
             hashtags,
-            author:user_id (id, username, avatar, bio, status, created_at),
+            profiles:user_id (id, username, avatar, bio, status, created_at),
             dynamo_gifts(count),
             replies(count)
           `)
@@ -613,8 +561,19 @@ export const dynamosService = {
           .maybeSingle();
 
         if (error || !data) return null;
-        if (data.status === 'deleted') return null;
-        if ((data as any).author && (data as any).author.status === 'suspended') return null;
+        if (data.status === 'deleted' || data.status === 'hidden') return null;
+        if (new Date(data.expires_at).getTime() <= Date.now() || data.status === 'expired') return null;
+
+        const author = (data as any).profiles;
+        if (author && author.status === 'suspended') return null;
+
+        // Check bidirectional block if current user is provided
+        if (currentUserId && currentUserId !== data.user_id) {
+          const relState = await relationshipsService.getRelationshipState(currentUserId, data.user_id);
+          if (relState.isBlocked || relState.isBlockedBy) {
+            return null;
+          }
+        }
 
         return {
           id: data.id,
@@ -627,7 +586,7 @@ export const dynamosService = {
           hashtags: data.hashtags || extractHashtags(data.content).tags,
           energy_gifts_count: (data as any).dynamo_gifts?.[0]?.count || 0,
           replies_count: (data as any).replies?.[0]?.count || 0,
-          author: (data as any).author,
+          author,
         };
       } catch (err) {
         console.warn('Error fetching single dynamo by ID:', err);
@@ -680,17 +639,25 @@ export const dynamosService = {
   },
 
   /**
-   * Subscribes to real-time new Dynamos.
-   * Calls onNewDynamo whenever an active, non-expired dynamo is published.
-   * Returns an unsubscribe function.
+   * Subscribes to real-time Dynamos events (INSERT of new dynamos and UPDATE of lifespan/energy/status).
+   * Returns an unsubscribe cleanup function.
    */
-  subscribeToNewDynamos(onNewDynamo: (dynamo: Dynamo) => void): () => void {
+  subscribeToNewDynamos(
+    onNewDynamo: (dynamo: Dynamo) => void,
+    onDynamoUpdated?: (update: {
+      id: string;
+      expires_at: string;
+      status: string;
+      image_url?: string | null;
+      energy_gifts_count?: number;
+    }) => void
+  ): () => void {
     if (!isSupabaseConfigured) {
       return () => {};
     }
 
     try {
-      const channelName = `realtime-new-dynamos-${Date.now()}`;
+      const channelName = `realtime-dynamos-channel-${Date.now()}`;
       const channel = supabase
         .channel(channelName)
         .on(
@@ -723,7 +690,7 @@ export const dynamosService = {
               id: raw.id,
               user_id: raw.user_id,
               content: raw.content,
-              image_url: raw.image_url,
+              image_url: raw.image_url || null,
               created_at: raw.created_at,
               expires_at: raw.expires_at,
               status: raw.status,
@@ -736,13 +703,45 @@ export const dynamosService = {
             onNewDynamo(dynamo);
           }
         )
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'dynamos',
+          },
+          async (payload) => {
+            if (!onDynamoUpdated) return;
+            const raw = payload.new as any;
+            if (!raw || !raw.id) return;
+
+            let giftsCount = 0;
+            try {
+              const { count } = await supabase
+                .from('dynamo_gifts')
+                .select('*', { count: 'exact', head: true })
+                .eq('dynamo_id', raw.id);
+              giftsCount = count || 0;
+            } catch {
+              giftsCount = 0;
+            }
+
+            onDynamoUpdated({
+              id: raw.id,
+              expires_at: raw.expires_at,
+              status: raw.status,
+              image_url: raw.image_url,
+              energy_gifts_count: giftsCount,
+            });
+          }
+        )
         .subscribe();
 
       return () => {
         supabase.removeChannel(channel);
       };
     } catch (err) {
-      console.warn('Error subscribing to new dynamos:', err);
+      console.warn('Error subscribing to dynamos realtime:', err);
       return () => {};
     }
   },

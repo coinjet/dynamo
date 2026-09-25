@@ -1,7 +1,7 @@
 import React from 'react';
 import { PWAInstallButton } from './PWAInstallButton';
 import { useAuth } from '@/src/modules/auth/AuthContext';
-import { Zap, Bell, LogIn, Shield, Settings } from 'lucide-react';
+import { Zap, Bell, LogIn, Shield, Settings, UserPlus } from 'lucide-react';
 import { EconomyBadge } from '../economy/EconomyBadge';
 
 interface HeaderProps {
@@ -14,6 +14,7 @@ interface HeaderProps {
   onGoToSettings?: () => void;
   onOpenEconomy?: () => void;
   economyRefreshTrigger?: number;
+  onOpenInvite?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -26,6 +27,7 @@ export const Header: React.FC<HeaderProps> = ({
   onGoToSettings,
   onOpenEconomy,
   economyRefreshTrigger = 0,
+  onOpenInvite,
 }) => {
   const { session, profile, isEmailConfirmed, signOut } = useAuth();
 
@@ -83,6 +85,18 @@ export const Header: React.FC<HeaderProps> = ({
                   onClick={onOpenEconomy}
                   refreshTrigger={economyRefreshTrigger}
                 />
+              )}
+
+              {onOpenInvite && (
+                <button
+                  id="btn-header-invite"
+                  onClick={onOpenInvite}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 text-xs font-semibold transition cursor-pointer"
+                  title="Invitar a Dynamo ⚡"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Invitar ⚡</span>
+                </button>
               )}
 
               <button

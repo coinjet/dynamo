@@ -28,6 +28,7 @@ interface ProfileViewProps {
   onOpenAuth?: () => void;
   onRelationshipChanged?: () => void;
   onGoToSettings?: () => void;
+  onOpenInvite?: () => void;
 }
 
 export const ProfileView: React.FC<ProfileViewProps> = ({
@@ -35,6 +36,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onOpenAuth,
   onRelationshipChanged,
   onGoToSettings,
+  onOpenInvite,
 }) => {
   const { profile: myProfile, signOut, user } = useAuth();
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -364,6 +366,18 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   <Share2 className="w-3.5 h-3.5 text-amber-400" />
                   <span>{copiedProfile ? 'Copiado' : 'Compartir'}</span>
                 </button>
+
+                {onOpenInvite && (
+                  <button
+                    id="btn-profile-invite"
+                    onClick={onOpenInvite}
+                    className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 text-xs font-semibold transition cursor-pointer"
+                    title="Invitar amigos a Dynamo ⚡"
+                  >
+                    <UserPlus className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Invitar amigos ⚡</span>
+                  </button>
+                )}
 
                 {onGoToSettings && (
                   <button

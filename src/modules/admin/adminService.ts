@@ -7,6 +7,9 @@ import {
   AdminUserItem,
   AdminUsersFilterParams,
   AdminAuditLogItem,
+  AdminGrowthFunnel,
+  AdminGrowthInviterItem,
+  AdminGrowthFilterParams,
   PaginatedResult,
 } from './adminTypes';
 import { ReportStatus, ReportReason } from '@/src/modules/moderation/moderationTypes';
@@ -482,6 +485,121 @@ export const adminService = {
       page: safePage,
       pageSize,
       totalPages,
+    };
+  },
+
+  /**
+   * Fetch aggregate referral and growth funnel metrics server-side
+   */
+  async getGrowthFunnel(adminUserId: string): Promise<AdminGrowthFunnel> {
+    const access = await this.verifyAccess(adminUserId);
+    if (!access.isAuthorized) {
+      throw new Error('Acceso denegado: permisos administrativos requeridos.');
+    }
+
+    if (!isSupabaseConfigured) {
+      return {
+        clicks: 0,
+        landing_views: 0,
+        signup_started: 0,
+        signup_completed: 0,
+        email_confirmed: 0,
+        first_dynamo: 0,
+        first_interaction: 0,
+        total_inviters: 0,
+        total_referred_users: 0,
+        total_confirmed_referred: 0,
+        total_first_dynamo: 0,
+        total_first_interaction: 0,
+        click_to_signup_rate: 0,
+        signup_to_confirmed_rate: 0,
+        confirmed_to_active_rate: 0,
+      };
+    }
+
+    const { data, error } = await supabase.rpc('admin_get_growth_funnel', {
+      p_admin_user_id: adminUserId,
+    });
+
+    if (error || !data) {
+      throw new Error(error?.message || 'Error al obtener el embudo de crecimiento.');
+    }
+
+    return {
+      clicks: Number(data.clicks || 0),
+      landing_views: Number(data.landing_views || 0),
+      signup_started: Number(data.signup_started || 0),
+      signup_completed: Number(data.signup_completed || 0),
+      email_confirmed: Number(data.email_confirmed || 0),
+      first_dynamo: Number(data.first_dynamo || 0),
+      first_interaction: Number(data.first_interaction || 0),
+      total_inviters: Number(data.total_inviters || 0),
+      total_referred_users: Number(data.total_referred_users || 0),
+      total_confirmed_referred: Number(data.total_confirmed_referred || 0),
+      total_first_dynamo: Number(data.total_first_dynamo || 0),
+      total_first_interaction: Number(data.total_first_interaction || 0),
+      click_to_signup_rate: Number(data.click_to_signup_rate || 0),
+      signup_to_confirmed_rate: Number(data.signup_to_confirmed_rate || 0),
+      confirmed_to_active_rate: Number(data.confirmed_to_active_rate || 0),
+    };
+  },
+
+  /**
+   * Fetch paginated list of inviters with real server-side stats (strictly PII-free)
+   */
+  async getGrowthUsers(
+    adminUserId: string,
+    params: AdminGrowthFilterParams
+  ): Promise<PaginatedResult<AdminGrowthInviterItem>> {
+    const access = await this.verifyAccess(adminUserId);
+    if (!access.isAuthorized) {
+      throw new Error('Acceso denegado: permisos administrativos requeridos.');
+    }
+
+    const pageSize = params.pageSize || 15;
+    const page = params.page || 1;
+
+    if (!isSupabaseConfigured) {
+      return {
+        items: [],
+        total: 0,
+        page,
+        pageSize,
+        totalPages: 1,
+      };
+    }
+
+    const { data, error } = await supabase.rpc('admin_get_growth_users', {
+      p_admin_user_id: adminUserId,
+      p_page: page,
+      p_page_size: pageSize,
+      p_search: params.searchQuery || null,
+    });
+
+    if (error || !data) {
+      throw new Error(error?.message || 'Error al obtener lista de invitadores.');
+    }
+
+    const items: AdminGrowthInviterItem[] = (data.items || []).map((row: any) => ({
+      inviter_id: row.inviter_id,
+      inviter_username: row.inviter_username || 'usuario',
+      inviter_avatar: row.inviter_avatar || '',
+      referral_code: row.referral_code || '',
+      code_created_at: row.code_created_at || '',
+      active: Boolean(row.active),
+      clicks: Number(row.clicks || 0),
+      signups: Number(row.signups || 0),
+      confirmations: Number(row.confirmations || 0),
+      first_dynamos: Number(row.first_dynamos || 0),
+      first_interactions: Number(row.first_interactions || 0),
+    }));
+
+    return {
+      items,
+      total: Number(data.total || 0),
+      page: Number(data.page || page),
+      pageSize: Number(data.pageSize || pageSize),
+      totalPages: Number(data.totalPages || 1),
     };
   },
 };

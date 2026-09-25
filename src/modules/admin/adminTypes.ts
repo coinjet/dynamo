@@ -86,3 +86,41 @@ export interface AdminAuditLogItem {
   reason?: string;
   created_at: string;
 }
+
+export interface AdminGrowthFunnel {
+  clicks: number;
+  landing_views: number;
+  signup_started: number;
+  signup_completed: number;
+  email_confirmed: number;
+  first_dynamo: number;
+  first_interaction: number;
+  total_inviters: number;
+  total_referred_users: number;
+  total_confirmed_referred: number;
+  total_first_dynamo: number;
+  total_first_interaction: number;
+  click_to_signup_rate: number;
+  signup_to_confirmed_rate: number;
+  confirmed_to_active_rate: number;
+}
+
+export interface AdminGrowthInviterItem {
+  inviter_id: string;
+  inviter_username: string;
+  inviter_avatar: string;
+  referral_code: string;
+  code_created_at: string;
+  active: boolean;
+  clicks: number;
+  signups: number;
+  confirmations: number;
+  first_dynamos: number;
+  first_interactions: number;
+}
+
+export interface AdminGrowthFilterParams {
+  searchQuery?: string;
+  page: number;
+  pageSize: number;
+}
