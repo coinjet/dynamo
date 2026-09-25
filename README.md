@@ -51,15 +51,13 @@ Inicia el servidor de desarrollo de Vite:
 npm run dev
 ```
 
-La aplicación estará disponible en [http://localhost:3000](http://localhost:3000).
-
-> **Modo Sandbox Local**: Si ejecutas sin configurar Supabase en desarrollo (`DEV`), la aplicación activa automáticamente un sandbox local aislado para iteración de interfaz. En producción (`PROD`), este modo está estrictamente bloqueado.
+La aplicación estará disponible localmente en el puerto configurado (ej. http://localhost:3000).
 
 ---
 
-## 4. Ejecutar Migraciones
+## 4. Ejecutar Migraciones en Supabase
 
-Aplica el esquema y las funciones de seguridad en tu base de datos Supabase ejecutando en orden cronológico las migraciones contenidas en `supabase/migrations/`:
+El repositorio cuenta con **24 migraciones** ordenadas cronológicamente en la carpeta `supabase/migrations/` que deben aplicarse secuencialmente en tu proyecto de Supabase:
 
 1. `20260914000000_init_dynamo_schema.sql` (Esquema base, tablas maestras, RLS y triggers de integridad)
 2. `20260914000001_notifications_module.sql` (Módulo de notificaciones)
@@ -72,8 +70,23 @@ Aplica el esquema y las funciones de seguridad en tu base de datos Supabase ejec
 9. `20260916000002_qa_audit_security_fixes.sql` (Auditoría de seguridad y parches SEC-01 a SEC-04)
 10. `20260918000001_admin_dashboard_v1.sql` (Dashboard Administrativo V1: comunicaciones, switches globales, publicidad y auditoría)
 11. `20260918000002_admin_switches_v1_1.sql` (Dashboard V1.1: 10 switches independientes y auditoría obligatoria)
+12. `20260918000003_dashboard_v1_2_security_comms_legal.sql` (Dashboard V1.2: soporte Telegram, legales y comunicados)
+13. `20260919000001_dynamo_multimedia_storage.sql` (Políticas Storage y validación multimedia)
+14. `20260919000002_prelaunch_security_hardening.sql` (Endurecimiento previo a lanzamiento)
+15. `20260920000001_v1_launch_hardening.sql` (Validación de bio y registro)
+16. `20260920000002_enable_realtime_notifications.sql` (Publicación Realtime para notificaciones)
+17. `20260920000003_consolidate_reply_notifications_and_threading.sql` (Hilos de respuesta y notificaciones consolidadas)
+18. `20260921000000_realtime_replica_identity_and_dynamos.sql` (Replica Identity Full y dynamos en Realtime)
+19. `20260924000001_fix_allow_images_jsonb_cast.sql` (Casteo seguro JSONB para interruptor allow_images)
+20. `20260924000002_production_hardening_and_unification.sql` (Unificación de triggers de dynamos, storage policies y RLS bidireccional)
+21. `20260925000001_v1_production_final_gate_hardening.sql` (Requisito legal de edad 16+ en documentos base y reactive pulse)
+22. `20260925000002_v1_production_referrals_and_growth.sql` (Sistema completo de invitaciones y referidos con atribución server-side, funnel de eventos y validación estricta de edad 16+ en DB)
+23. `20260925000003_v1_admin_growth_and_security.sql` (Panel administrativo de Invitaciones/Crecimiento, RPCs de embudo global y listado de invitadores con RLS blindada)
+24. `20260925000004_v1_security_hardening_admin_rpcs.sql` (Parche crítico de seguridad en RPCs administrativas: validación estricta contra auth.uid() y eliminación de suplantación de UUIDs)
 
-Puedes aplicarlas copiando su contenido en el **SQL Editor** de Supabase o mediante el Supabase CLI (`supabase db push`).
+> **Requisito Legal de Edad**: La edad mínima permitida para registrarse y participar en Dynamo es de **16 años cumplidos**. Este requisito está enforced estrictamente a nivel de cliente y servidor/DB (trigger `handle_new_user()`).
+
+Puedes aplicarlas copiando su contenido en el **SQL Editor** de Supabase (o ejecutando `supabase/schema.sql`) o mediante el Supabase CLI (`supabase db push`).
 
 ---
 
