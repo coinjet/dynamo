@@ -129,9 +129,12 @@ export function formatUserFriendlyError(error: unknown): string {
     lower.includes('table') ||
     lower.includes('relation') ||
     lower.includes('schema') ||
-    lower.includes('rpc')
+    lower.includes('rpc') ||
+    lower.includes('record "') ||
+    lower.includes('has no field') ||
+    lower.includes('sender_user_id')
   ) {
-    return 'No se pudo procesar la solicitud en el servidor. Por favor, intenta de nuevo más tarde.';
+    return 'No se pudo procesar la solicitud de energía en el servidor. Por favor, intenta de nuevo más tarde.';
   }
 
   // If already clean and short without technical jargon, return it

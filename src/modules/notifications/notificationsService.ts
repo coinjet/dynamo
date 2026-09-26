@@ -70,7 +70,7 @@ export const notificationsService = {
               switch (n.type) {
                 case 'gift':
                   title = '¡Energía Recibida! ⚡';
-                  description = `${senderUsername} inyectó +6 horas de vida a tu Dynamo.`;
+                  description = `${senderUsername} te dio ⚡ a tu Dynamo.`;
                   break;
                 case 'reply': {
                   const isReplyToReply = n.metadata?.target_type === 'reply' || Boolean(n.metadata?.parent_reply_id);

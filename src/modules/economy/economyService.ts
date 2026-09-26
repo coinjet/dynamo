@@ -108,8 +108,8 @@ export const economyService = {
         p_dynamo_id: dynamoId,
       });
 
-      if (error) {
-        throw new Error(error.message);
+      if (error || !data || data.success === false) {
+        throw new Error(error?.message || data?.error || 'No se pudo entregar energía al Dynamo.');
       }
 
       return {
@@ -117,10 +117,10 @@ export const economyService = {
         dynamo_id: dynamoId,
         new_expires_at: data.new_expires_at,
         newExpiresAt: data.new_expires_at,
-        total_gifts: data.total_gifts,
-        totalGifts: data.total_gifts,
+        total_gifts: data.total_gifts ?? data.gifts_count ?? 1,
+        totalGifts: data.total_gifts ?? data.gifts_count ?? 1,
         balance_type_used: data.balance_type_used || 'free',
-        free_remaining_today: data.free_remaining_today ?? 0,
+        free_remaining_today: data.free_remaining_today ?? data.remaining_free_today ?? 0,
         purchased_balance: data.purchased_balance ?? 0,
         total_available: data.total_available ?? 0,
         reached_max_lifespan: Boolean(data.reached_max_lifespan),

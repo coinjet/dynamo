@@ -363,16 +363,16 @@ export const dynamosService = {
         p_dynamo_id: dynamoId,
       });
 
-      if (error) {
-        throw new Error(error.message);
+      if (error || !data || data.success === false) {
+        throw new Error(error?.message || data?.error || 'No se pudo entregar energía al Dynamo.');
       }
 
       // Check if maximum lifespan was reached
       return {
         newExpiresAt: data.new_expires_at,
-        totalGifts: data.total_gifts ?? 1,
+        totalGifts: data.total_gifts ?? data.gifts_count ?? 1,
         reachedMaxLifespan: Boolean(data.reached_max_lifespan),
-        giftsRemainingToday: data.gifts_remaining_today,
+        giftsRemainingToday: data.gifts_remaining_today ?? data.remaining_free_today,
       };
     }
 
