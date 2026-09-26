@@ -57,7 +57,7 @@ La aplicación estará disponible localmente en el puerto configurado (ej. http:
 
 ## 4. Ejecutar Migraciones en Supabase
 
-El repositorio cuenta con **24 migraciones** ordenadas cronológicamente en la carpeta `supabase/migrations/` que deben aplicarse secuencialmente en tu proyecto de Supabase:
+El repositorio cuenta con **26 migraciones** ordenadas cronológicamente en la carpeta `supabase/migrations/` que deben aplicarse secuencialmente en tu proyecto de Supabase:
 
 1. `20260914000000_init_dynamo_schema.sql` (Esquema base, tablas maestras, RLS y triggers de integridad)
 2. `20260914000001_notifications_module.sql` (Módulo de notificaciones)
@@ -83,6 +83,8 @@ El repositorio cuenta con **24 migraciones** ordenadas cronológicamente en la c
 22. `20260925000002_v1_production_referrals_and_growth.sql` (Sistema completo de invitaciones y referidos con atribución server-side, funnel de eventos y validación estricta de edad 16+ en DB)
 23. `20260925000003_v1_admin_growth_and_security.sql` (Panel administrativo de Invitaciones/Crecimiento, RPCs de embudo global y listado de invitadores con RLS blindada)
 24. `20260925000004_v1_security_hardening_admin_rpcs.sql` (Parche crítico de seguridad en RPCs administrativas: validación estricta contra auth.uid() y eliminación de suplantación de UUIDs)
+25. `20260925000005_v1_fix_dynamo_gift_flow_and_triggers.sql` (Corrección integral del flujo ⚡: solución al error de columna giver_id en trg_referral_first_gift y consolidación atómica de gift_energy_to_dynamo con notificación al autor)
+26. `20260925000006_v1_final_gift_economy_hardening.sql` (Blindaje definitivo de economía ⚡: conteo de cuota gratuita en ventana móvil de 24h sin contaminación por saldo adquirido, jerarquía de locks anti-deadlock y preferencias de notificación server-side)
 
 > **Requisito Legal de Edad**: La edad mínima permitida para registrarse y participar en Dynamo es de **16 años cumplidos**. Este requisito está enforced estrictamente a nivel de cliente y servidor/DB (trigger `handle_new_user()`).
 
